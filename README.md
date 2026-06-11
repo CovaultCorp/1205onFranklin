@@ -106,6 +106,50 @@ docker compose run --rm unifi-access-exporter
 
 Exports are written to `./exports`.
 
+## Run As A Portainer Stack
+
+Use `portainer-stack.yml` when deploying through Portainer.
+
+Recommended Git repository flow:
+
+1. Push this repository to GitHub.
+2. In Portainer, go to Stacks -> Add stack.
+3. Choose Repository.
+4. Set the repository URL and branch.
+5. Set Compose path to `portainer-stack.yml`.
+6. Add stack environment variables in Portainer.
+7. Deploy the stack.
+8. Start the `unifi-access-exporter` container manually whenever you want a fresh export.
+
+Required Portainer environment variables:
+
+```text
+UNIFI_ACCESS_BASE_URL=https://192.168.1.1:12445
+UNIFI_ACCESS_TOKEN=your_token_here
+```
+
+Common Portainer environment variables:
+
+```text
+UNIFI_ACCESS_VERIFY_SSL=false
+UNIFI_ACCESS_PAGE_SIZE=100
+EXPORT_CSV=true
+EXPORT_JSON=true
+LOG_LEVEL=INFO
+SYNC_MODE=export_only
+SOURCE_OF_TRUTH=unifi_access
+ENABLE_WRITES=false
+```
+
+The Portainer stack writes exports to a Docker named volume called `unifi_access_exports`. If you want host-visible files instead, replace the volume in `portainer-stack.yml` with a bind mount such as:
+
+```yaml
+volumes:
+  - /opt/unifi-access-exporter/exports:/app/exports
+```
+
+Do not store `UNIFI_ACCESS_TOKEN` directly in the Git repository.
+
 ## Schedule With Cron
 
 Example hourly export:

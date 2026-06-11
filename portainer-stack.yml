@@ -1,0 +1,28 @@
+services:
+  unifi-access-exporter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: unifi-access-exporter:local
+    container_name: unifi-access-exporter
+    environment:
+      UNIFI_ACCESS_BASE_URL: ${UNIFI_ACCESS_BASE_URL}
+      UNIFI_ACCESS_TOKEN: ${UNIFI_ACCESS_TOKEN}
+      UNIFI_ACCESS_VERIFY_SSL: ${UNIFI_ACCESS_VERIFY_SSL:-false}
+      UNIFI_ACCESS_PAGE_SIZE: ${UNIFI_ACCESS_PAGE_SIZE:-100}
+      OUTPUT_DIR: /app/exports
+      EXPORT_CSV: ${EXPORT_CSV:-true}
+      EXPORT_JSON: ${EXPORT_JSON:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SYNC_MODE: ${SYNC_MODE:-export_only}
+      SOURCE_OF_TRUTH: ${SOURCE_OF_TRUTH:-unifi_access}
+      ENABLE_WRITES: ${ENABLE_WRITES:-false}
+      MICROSOFT_LIST_WEBHOOK_URL: ${MICROSOFT_LIST_WEBHOOK_URL:-}
+      HOME_ASSISTANT_WEBHOOK_URL: ${HOME_ASSISTANT_WEBHOOK_URL:-}
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-}
+    volumes:
+      - unifi_access_exports:/app/exports
+    restart: "no"
+
+volumes:
+  unifi_access_exports:
