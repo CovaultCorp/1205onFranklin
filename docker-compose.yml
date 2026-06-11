@@ -1,0 +1,10 @@
+services:
+  unifi-access-exporter:
+    build: .
+    container_name: unifi-access-exporter
+    env_file:
+      - .env
+    volumes:
+      - ./exports:/app/exports
+      - ./.env:/app/.env:ro
+    restart: "no"
