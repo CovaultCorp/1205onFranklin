@@ -16,7 +16,7 @@ UniFi Access is the target access-control system.
 
 ## Implementation status
 
-Phase 1 is implemented in this repository: local registry models, request portal, admin UI, reporting, email preview mode, Docker stack, and dry-run-only UniFi stubs. Phase 2 through Phase 4 remain future work.
+Phase 1 and Phase 2 are implemented in this repository: local registry models, request portal, admin UI, reporting, email preview mode, Docker stack, dry-run-only UniFi stubs, read-only UniFi reconciliation, local UniFi snapshots, conflict detection, and dry-run proposed sync jobs. Phase 3 through Phase 4 remain future work.
 
 ## Primary goals
 

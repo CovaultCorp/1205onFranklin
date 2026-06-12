@@ -2,7 +2,7 @@
 
 Dockerized internal FastAPI app for managing building access companies, suites, users, access requests, approvals, reports, verification links, and dry-run UniFi Access sync planning.
 
-The local PostgreSQL database is the source of truth. UniFi Access is a target access-control system, but Phase 1 does not write to UniFi.
+The local PostgreSQL database is the source of truth. UniFi Access is a target access-control system, but Phase 1 and Phase 2 do not write to UniFi.
 
 ## Phase 1 Scope
 
@@ -26,6 +26,30 @@ Not implemented in Phase 1:
 - User deletion in UniFi.
 - Read-only reconciliation beyond a Phase 1 dry-run placeholder.
 - Scheduled reports.
+
+## Phase 2 Scope
+
+Implemented:
+
+- Paginated read-only UniFi Access API methods:
+  - `list_users(expand_access_policy=True)`
+  - `get_user(user_id)`
+  - `list_access_policies()`
+  - `list_user_groups()`
+- Read-only reconciliation from UniFi into local `UnifiUser` snapshots.
+- Matching by existing UniFi mapping, then employee number, then email.
+- Conflict detection for unmatched active users, missing company/suite assignments, status mismatch, name/email mismatch, access policy mismatch, duplicate UniFi email/employee number, inactive company, and inactive suite.
+- Idempotent open-conflict creation on repeated reconciliation runs.
+- Dry-run `SyncJob(job_type="reconcile")` records containing proposed actions only.
+- Admin “Run UniFi Reconciliation” action, reconciliation summary, improved conflict view, and improved sync job view.
+- CLI entry point: `python scripts/run_reconcile.py`.
+
+Not implemented in Phase 2:
+
+- UniFi create, update, deactivate, delete, policy assignment, or credential provisioning.
+- NFC, PIN, Touch Pass, or raw credential storage.
+- Automatic conflict resolution.
+- Scheduled reconciliation.
 
 ## Required Environment Variables
 
@@ -94,6 +118,12 @@ uvicorn app.main:app --reload --port 8080
 
 Open `http://localhost:8080/setup-admin` to create the first admin.
 
+Run read-only reconciliation from the command line:
+
+```powershell
+python scripts/run_reconcile.py
+```
+
 ## Run With Docker Compose
 
 ```powershell
@@ -126,10 +156,11 @@ Supply environment variables in Portainer stack settings. Keep `ENABLE_WRITES=fa
 ## Safety Warnings
 
 - `ENABLE_WRITES=false` is the default.
-- Phase 1 write methods in `app/unifi_client.py` raise unless writes are enabled, then raise `NotImplementedError` because UniFi write behavior is intentionally not implemented.
+- Phase 1 and Phase 2 write methods in `app/unifi_client.py` raise unless writes are enabled, then raise `NotImplementedError` because UniFi write behavior is intentionally not implemented.
 - The UniFi API token and SMTP password are server-side only.
 - Email disabled mode writes preview files to `EXPORT_DIR/email_previews`.
 - Approval creates `SyncJob` records and audit logs; it does not provision directly.
+- Reconciliation creates local snapshots, open conflicts, and dry-run proposed actions only. It does not call UniFi write APIs.
 
 ## Tests
 
@@ -137,4 +168,4 @@ Supply environment variables in Portainer stack settings. Keep `ENABLE_WRITES=fa
 pytest
 ```
 
-The test suite covers the preserved exporter behavior and focused Phase 1 application behavior.
+The test suite covers the preserved exporter behavior, focused Phase 1 application behavior, and Phase 2 reconciliation behavior.

@@ -2,11 +2,29 @@
 {% block content %}
 <section class="panel">
   <h1>Conflicts</h1>
-  <table><tr><th>ID</th><th>Type</th><th>Description</th><th>Status</th><th>Resolve</th></tr>
+  <p>{{ open_count }} open conflicts need review.</p>
+  <table><tr><th>ID</th><th>Type</th><th>Description</th><th>Local State</th><th>UniFi State</th><th>Status</th><th>Resolve</th></tr>
   {% for conflict in conflicts %}
-    <tr><td>{{ conflict.id }}</td><td>{{ conflict.conflict_type }}</td><td>{{ conflict.description }}</td><td>{{ conflict.status }}</td><td><form method="post" action="/admin/conflicts/{{ conflict.id }}/resolve"><input name="status" value="resolved"><button type="submit">Save</button></form></td></tr>
+    <tr>
+      <td>{{ conflict.id }}</td>
+      <td>{{ conflict.conflict_type }}</td>
+      <td>{{ conflict.description }}</td>
+      <td><pre>{{ conflict.local_state_json or "" }}</pre></td>
+      <td><pre>{{ conflict.unifi_state_json or "" }}</pre></td>
+      <td>{{ conflict.status }}</td>
+      <td>
+        <form method="post" action="/admin/conflicts/{{ conflict.id }}/resolve">
+          <select name="status">
+            <option value="resolved">Resolved</option>
+            <option value="accepted_unifi">Accepted UniFi</option>
+            <option value="reapply_portal">Reapply Portal</option>
+            <option value="ignored">Ignored</option>
+          </select>
+          <button type="submit">Save</button>
+        </form>
+      </td>
+    </tr>
   {% endfor %}
   </table>
 </section>
 {% endblock %}
-

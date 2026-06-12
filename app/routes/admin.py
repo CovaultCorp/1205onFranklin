@@ -20,10 +20,11 @@ from app.models import (
     ReportRun,
     Suite,
     SyncJob,
+    UnifiUser,
     User,
     utcnow,
 )
-from app.reconcile import queue_phase1_reconcile_stub
+from app.reconcile import run_unifi_reconciliation
 from app.security import require_admin
 
 router = APIRouter(prefix="/admin")
@@ -59,6 +60,7 @@ def dashboard(
         or 0,
         "open_conflicts": session.scalar(select(func.count(Conflict.id)).where(Conflict.status == "open")) or 0,
         "sync_failures": session.scalar(select(func.count(SyncJob.id)).where(SyncJob.status == "failed")) or 0,
+        "unifi_snapshots": session.scalar(select(func.count(UnifiUser.id))) or 0,
     }
     return templates.TemplateResponse(
         request,
@@ -287,7 +289,15 @@ def update_access_profile(profile_id: int, name: str = Form(...), active: bool =
 
 @router.get("/conflicts", response_class=HTMLResponse)
 def conflicts(request: Request, session: Session = Depends(get_session), account: PortalAccount = Depends(require_admin)):
-    return templates.TemplateResponse(request, "admin/conflicts.html", {"account": account, "conflicts": session.scalars(select(Conflict).order_by(Conflict.created_at.desc())).all()})
+    return templates.TemplateResponse(
+        request,
+        "admin/conflicts.html",
+        {
+            "account": account,
+            "conflicts": session.scalars(select(Conflict).order_by(Conflict.created_at.desc())).all(),
+            "open_count": session.scalar(select(func.count(Conflict.id)).where(Conflict.status == "open")) or 0,
+        },
+    )
 
 
 @router.post("/conflicts/{conflict_id}/resolve")
@@ -303,11 +313,20 @@ def resolve_conflict(conflict_id: int, status: str = Form("resolved"), session: 
 
 @router.get("/sync-jobs", response_class=HTMLResponse)
 def sync_jobs(request: Request, session: Session = Depends(get_session), account: PortalAccount = Depends(require_admin)):
-    return templates.TemplateResponse(request, "admin/sync_jobs.html", {"account": account, "sync_jobs": session.scalars(select(SyncJob).order_by(SyncJob.created_at.desc())).all()})
+    last_reconcile = session.scalar(select(SyncJob).where(SyncJob.job_type == "reconcile").order_by(SyncJob.created_at.desc()))
+    return templates.TemplateResponse(
+        request,
+        "admin/sync_jobs.html",
+        {
+            "account": account,
+            "sync_jobs": session.scalars(select(SyncJob).order_by(SyncJob.created_at.desc())).all(),
+            "last_reconcile": last_reconcile,
+        },
+    )
 
 
 @router.post("/reconcile/run")
-def run_reconcile(session: Session = Depends(get_session), account: PortalAccount = Depends(require_admin)):
-    queue_phase1_reconcile_stub(session)
+async def run_reconcile(session: Session = Depends(get_session), account: PortalAccount = Depends(require_admin)):
+    await run_unifi_reconciliation(session)
     session.commit()
     return RedirectResponse("/admin/sync-jobs", status_code=303)
