@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel narrow">
+  <h1>Users by Suite</h1>
+  <form method="post" action="/admin/reports/suite-users/preview">
+    <label>Suite <select name="suite_id">{% for suite in suites %}<option value="{{ suite.id }}">{{ suite.suite_number }}</option>{% endfor %}</select></label>
+    <button type="submit">Preview</button>
+  </form>
+  <form method="post" action="/admin/reports/suite-users/send">
+    <label>Suite <select name="suite_id">{% for suite in suites %}<option value="{{ suite.id }}">{{ suite.suite_number }}</option>{% endfor %}</select></label>
+    <label>Recipient email <input name="recipient_email" type="email" required></label>
+    <button type="submit">Send or preview email</button>
+  </form>
+</section>
+{% endblock %}
+

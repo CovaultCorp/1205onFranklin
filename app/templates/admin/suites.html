@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h1>Suites</h1>
+  <form method="post" class="grid-form">
+    <label>Suite number <input name="suite_number" required></label>
+    <label>Floor <input name="floor"></label>
+    <label>Building area <input name="building_area"></label>
+    <button type="submit">Add suite</button>
+  </form>
+  <table><tr><th>Suite</th><th>Floor</th><th>Status</th><th>Update</th></tr>
+  {% for suite in suites %}
+    <tr><form method="post" action="/admin/suites/{{ suite.id }}/update"><td><input name="suite_number" value="{{ suite.suite_number }}"></td><td>{{ suite.floor or "" }}</td><td><input name="status" value="{{ suite.status }}"></td><td><button type="submit">Save</button></td></form></tr>
+  {% endfor %}
+  </table>
+</section>
+{% endblock %}
+

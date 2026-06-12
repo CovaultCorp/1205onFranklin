@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h1>Users</h1>
+  <table><tr><th>Name</th><th>Email</th><th>Company</th><th>Suite</th><th>Status</th></tr>
+  {% for user in users %}
+    <tr><td><a href="/admin/users/{{ user.id }}">{{ user.first_name }} {{ user.last_name }}</a></td><td>{{ user.email }}</td><td>{{ user.company.name if user.company else "" }}</td><td>{{ user.primary_suite.suite_number if user.primary_suite else "" }}</td><td>{{ user.status }}</td></tr>
+  {% endfor %}
+  </table>
+</section>
+{% endblock %}
+

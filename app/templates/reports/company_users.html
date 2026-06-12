@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel narrow">
+  <h1>Users by Company</h1>
+  <form method="post" action="/admin/reports/company-users/preview">
+    <label>Company <select name="company_id">{% for company in companies %}<option value="{{ company.id }}">{{ company.name }}</option>{% endfor %}</select></label>
+    <button type="submit">Preview</button>
+  </form>
+  <form method="post" action="/admin/reports/company-users/send">
+    <label>Company <select name="company_id">{% for company in companies %}<option value="{{ company.id }}">{{ company.name }}</option>{% endfor %}</select></label>
+    <label>Recipient email <input name="recipient_email" type="email" required></label>
+    <button type="submit">Send or preview email</button>
+  </form>
+</section>
+{% endblock %}
+

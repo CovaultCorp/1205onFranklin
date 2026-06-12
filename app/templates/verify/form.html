@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel narrow">
+  <h1>Verification</h1>
+  {% if not record %}
+    <p class="error">Verification link not found.</p>
+  {% elif expired %}
+    <p class="error">This verification link has expired.</p>
+  {% else %}
+    <p>Status: {{ record.status }}</p>
+    <form method="post">
+      <label>Response
+        <select name="status">
+          <option value="verified">Verified accurate</option>
+          <option value="changes_requested">Changes requested</option>
+        </select>
+      </label>
+      <label>Name <input name="verified_by_name" required></label>
+      <label>Email <input name="verified_by_email" type="email" required></label>
+      <label>Comments <textarea name="comments"></textarea></label>
+      <button type="submit">Submit verification</button>
+    </form>
+  {% endif %}
+</section>
+{% endblock %}
+

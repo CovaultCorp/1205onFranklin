@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h1>Company Suite Occupancy</h1>
+  <form method="post" class="grid-form">
+    <label>Company <select name="company_id">{% for company in companies %}<option value="{{ company.id }}">{{ company.name }}</option>{% endfor %}</select></label>
+    <label>Suite <select name="suite_id">{% for suite in suites %}<option value="{{ suite.id }}">{{ suite.suite_number }}</option>{% endfor %}</select></label>
+    <label>Status <input name="occupancy_status" value="active"></label>
+    <button type="submit">Add occupancy</button>
+  </form>
+  <table><tr><th>Company</th><th>Suite</th><th>Status</th></tr>
+  {% for item in company_suites %}<tr><td>{{ item.company.name }}</td><td>{{ item.suite.suite_number }}</td><td>{{ item.occupancy_status }}</td></tr>{% endfor %}
+  </table>
+</section>
+{% endblock %}
+

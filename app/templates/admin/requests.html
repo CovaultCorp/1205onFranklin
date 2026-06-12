@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h1>Access Requests</h1>
+  <table><tr><th>ID</th><th>Person</th><th>Type</th><th>Status</th><th>Requester</th></tr>
+  {% for item in requests %}
+    <tr><td><a href="/admin/requests/{{ item.id }}">{{ item.id }}</a></td><td>{{ item.requested_for_first_name }} {{ item.requested_for_last_name }}</td><td>{{ item.request_type }}</td><td>{{ item.status }}</td><td>{{ item.requester_email }}</td></tr>
+  {% endfor %}
+  </table>
+</section>
+{% endblock %}
+

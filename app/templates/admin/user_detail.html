@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h1>{{ user.first_name }} {{ user.last_name }}</h1>
+  <p>{{ user.email }}</p>
+  <p>Status: {{ user.status }}</p>
+  <p>Company: {{ user.company.name if user.company else "" }}</p>
+  <p>Suite: {{ user.primary_suite.suite_number if user.primary_suite else "" }}</p>
+</section>
+{% endblock %}
+

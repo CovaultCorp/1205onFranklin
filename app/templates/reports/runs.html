@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h1>Report Runs</h1>
+  <table><tr><th>ID</th><th>Type</th><th>Status</th><th>Recipient</th><th>Created</th></tr>
+  {% for run in runs %}<tr><td><a href="/admin/reports/runs/{{ run.id }}">{{ run.id }}</a></td><td>{{ run.report_type }}</td><td>{{ run.status }}</td><td>{{ run.recipient_email or "" }}</td><td>{{ run.created_at }}</td></tr>{% endfor %}
+  </table>
+</section>
+{% endblock %}
+

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h1>Sync Jobs</h1>
+  <form method="post" action="/admin/reconcile/run"><button type="submit">Queue Phase 1 reconcile dry run</button></form>
+  <table><tr><th>ID</th><th>Request</th><th>Type</th><th>Status</th><th>Proposed Actions</th><th>Result</th></tr>
+  {% for job in sync_jobs %}<tr><td>{{ job.id }}</td><td>{{ job.access_request_id or "" }}</td><td>{{ job.job_type }}</td><td>{{ job.status }}</td><td><pre>{{ job.proposed_actions }}</pre></td><td><pre>{{ job.result_json }}</pre></td></tr>{% endfor %}
+  </table>
+</section>
+{% endblock %}
+

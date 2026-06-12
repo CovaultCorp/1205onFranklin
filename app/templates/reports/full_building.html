@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel narrow">
+  <h1>Full Building Report</h1>
+  <form method="post" action="/admin/reports/full-building/preview"><button type="submit">Preview</button></form>
+  <form method="post" action="/admin/reports/full-building/send">
+    <label>Recipient email <input name="recipient_email" type="email" required></label>
+    <button type="submit">Send or preview email</button>
+  </form>
+</section>
+{% endblock %}
+

@@ -1,205 +1,140 @@
-# UniFi Access User Exporter
+# Building Access Registry
 
-Dockerized Python utility for exporting users from a local UniFi Access system through the UniFi Access developer API.
+Dockerized internal FastAPI app for managing building access companies, suites, users, access requests, approvals, reports, verification links, and dry-run UniFi Access sync planning.
 
-The first version is export-first and read-only. It fetches users from:
+The local PostgreSQL database is the source of truth. UniFi Access is a target access-control system, but Phase 1 does not write to UniFi.
+
+## Phase 1 Scope
+
+Implemented:
+
+- Local registry models for accounts, companies, suites, company-suite occupancy, users, access profiles, access requests, UniFi snapshots, sync jobs, conflicts, reports, verification requests, and audit logs.
+- First-admin setup and local admin login.
+- Public access request form.
+- Admin dashboard and registry management pages.
+- Request approval/denial/needs-info workflow.
+- Approval queues `SyncJob` dry-run records instead of calling UniFi write APIs.
+- Report preview, CSV export, report run records, and email preview files when `ENABLE_EMAIL=false`.
+- Verification links that allow recipients to mark a report accurate or request changes.
+- Docker Compose / Portainer stack with `web`, `worker`, and `db`.
+- Existing read-only UniFi exporter code is preserved under `src/`.
+
+Not implemented in Phase 1:
+
+- UniFi writes.
+- NFC, PIN, Touch Pass, or raw credential provisioning.
+- User deletion in UniFi.
+- Read-only reconciliation beyond a Phase 1 dry-run placeholder.
+- Scheduled reports.
+
+## Required Environment Variables
+
+Core:
 
 ```text
-GET /api/v1/developer/users
+DATABASE_URL=postgresql+psycopg://building_access:change_me@db:5432/building_access_registry
+POSTGRES_PASSWORD=change_me
+APP_SECRET_KEY=change_me
+ADMIN_EMAIL=admin@example.com
+ADMIN_INITIAL_PASSWORD=
+PUBLIC_BASE_URL=http://localhost:8080
+AUTH_MODE=local
+TRUST_PROXY_HEADERS=false
+LOG_LEVEL=INFO
+EXPORT_DIR=/app/exports
 ```
 
-It writes timestamped exports:
-
-- Normalized CSV for spreadsheet and inventory tools
-- Normalized JSON for automation systems
-- Sanitized raw JSON for audit/debug use
-
-Sensitive-looking fields such as tokens, PINs, hashes, card credential data, passwords, secrets, and webhook values are redacted from the raw export and are not included in the CSV.
-
-## Create A UniFi Access API Token
-
-In UniFi Access, create a local developer/API token from the UniFi Access console settings. The exact UI can vary by UniFi Access version, but the flow is generally:
-
-1. Open UniFi Access on your local console.
-2. Go to the developer/API integration settings.
-3. Create a new API token.
-4. Grant the token read/view permissions for users.
-5. Store the token in `.env` as `UNIFI_ACCESS_TOKEN`.
-
-Minimum permission:
-
-- Read/view users
-
-Avoid granting write, admin, or provisioning permissions to the token used by this exporter.
-
-## Configuration
-
-Copy the example file and edit it:
-
-```powershell
-cp .env.example .env
-```
-
-Required:
+UniFi:
 
 ```text
 UNIFI_ACCESS_BASE_URL=https://192.168.1.1:12445
-UNIFI_ACCESS_TOKEN=replace_me
-```
-
-Common options:
-
-```text
+UNIFI_ACCESS_TOKEN=
 UNIFI_ACCESS_VERIFY_SSL=false
 UNIFI_ACCESS_PAGE_SIZE=100
-OUTPUT_DIR=./exports
-EXPORT_CSV=true
-EXPORT_JSON=true
-LOG_LEVEL=INFO
+ENABLE_WRITES=false
+SYNC_INTERVAL_SECONDS=300
 ```
 
-`UNIFI_ACCESS_VERIFY_SSL` defaults to safe certificate verification when omitted. Set it to `false` only when your local UniFi Access console uses a self-signed certificate and you understand the risk.
-
-Future sync placeholders:
+Email:
 
 ```text
-SYNC_MODE=export_only
-SOURCE_OF_TRUTH=unifi_access
-ENABLE_WRITES=false
-MICROSOFT_LIST_WEBHOOK_URL=
-HOME_ASSISTANT_WEBHOOK_URL=
-N8N_WEBHOOK_URL=
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_FROM_EMAIL=
+SMTP_FROM_NAME=Building Access Registry
+SMTP_USE_TLS=true
+ENABLE_EMAIL=false
 ```
 
-Any mode other than `export_only` requires `ENABLE_WRITES=true`, but write-back/provisioning is intentionally not implemented in this version.
+Reports:
 
-## Run With Python
+```text
+REPORT_DEFAULT_RECIPIENTS=
+REPORT_VERIFICATION_EXPIRATION_DAYS=14
+ENABLE_SCHEDULED_REPORTS=false
+REPORT_SCHEDULE_CRON=0 8 1 * *
+REPORT_TIMEZONE=America/New_York
+REPORT_DEFAULT_TYPE=full_building_access
+```
+
+Do not commit `.env` files or secrets.
+
+## Run Locally
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-cp .env.example .env
-# edit .env
-python src/unifi_access_exporter.py
+$env:DATABASE_URL="sqlite:///./dev.db"
+$env:EXPORT_DIR="./exports"
+uvicorn app.main:app --reload --port 8080
 ```
 
-On Linux/macOS:
-
-```sh
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-# edit .env
-python src/unifi_access_exporter.py
-```
+Open `http://localhost:8080/setup-admin` to create the first admin.
 
 ## Run With Docker Compose
 
-```sh
-cp .env.example .env
-# edit .env
+```powershell
 docker compose build
-docker compose run --rm unifi-access-exporter
+docker compose up -d
+docker compose logs --tail=100 web
+docker compose logs --tail=100 worker
 ```
 
-Exports are written to `./exports`.
+The app listens on port `8080`. PostgreSQL data is stored in the Docker named volume `building_access_registry_pgdata`. Reports, previews, and exports are written to `/app/exports`.
 
-## Run As A Portainer Stack
+## Portainer
 
-Use `portainer-stack.yml` when deploying through Portainer.
+Deploy the repository as a Git-backed stack using `docker-compose.yml` or `portainer-stack.yml`.
 
-Recommended Git repository flow:
+Expected services:
 
-1. Push this repository to GitHub.
-2. In Portainer, go to Stacks -> Add stack.
-3. Choose Repository.
-4. Set the repository URL and branch.
-5. Set Compose path to `portainer-stack.yml`.
-6. Add stack environment variables in Portainer.
-7. Deploy the stack.
-8. Start the `unifi-access-exporter` container manually whenever you want a fresh export.
+- `web`
+- `worker`
+- `db`
 
-Required Portainer environment variables:
+Expected export bind mount:
 
 ```text
-UNIFI_ACCESS_BASE_URL=https://192.168.1.1:12445
-UNIFI_ACCESS_TOKEN=your_token_here
+/mnt/unas/docker-exports/building-access-registry:/app/exports
 ```
 
-Common Portainer environment variables:
+Supply environment variables in Portainer stack settings. Keep `ENABLE_WRITES=false` unless a future phase explicitly implements and approves UniFi write behavior.
 
-```text
-UNIFI_ACCESS_VERIFY_SSL=false
-UNIFI_ACCESS_PAGE_SIZE=100
-EXPORT_CSV=true
-EXPORT_JSON=true
-LOG_LEVEL=INFO
-SYNC_MODE=export_only
-SOURCE_OF_TRUTH=unifi_access
-ENABLE_WRITES=false
+## Safety Warnings
+
+- `ENABLE_WRITES=false` is the default.
+- Phase 1 write methods in `app/unifi_client.py` raise unless writes are enabled, then raise `NotImplementedError` because UniFi write behavior is intentionally not implemented.
+- The UniFi API token and SMTP password are server-side only.
+- Email disabled mode writes preview files to `EXPORT_DIR/email_previews`.
+- Approval creates `SyncJob` records and audit logs; it does not provision directly.
+
+## Tests
+
+```powershell
+pytest
 ```
 
-The Portainer stack writes exports to a Docker named volume called `unifi_access_exports`. If you want host-visible files instead, replace the volume in `portainer-stack.yml` with a bind mount such as:
-
-```yaml
-volumes:
-  - /opt/unifi-access-exporter/exports:/app/exports
-```
-
-Do not store `UNIFI_ACCESS_TOKEN` directly in the Git repository.
-
-## Schedule With Cron
-
-Example hourly export:
-
-```cron
-0 * * * * cd /opt/unifi-access-exporter && docker compose run --rm unifi-access-exporter >> /var/log/unifi-access-exporter.log 2>&1
-```
-
-Example nightly export:
-
-```cron
-15 2 * * * cd /opt/unifi-access-exporter && docker compose run --rm unifi-access-exporter >> /var/log/unifi-access-exporter.log 2>&1
-```
-
-Use a service account, protect `.env`, and rotate the UniFi Access token on a regular schedule.
-
-## Import CSV Into Excel, SharePoint, Or Microsoft Lists
-
-Excel:
-
-1. Open Excel.
-2. Choose Data -> From Text/CSV.
-3. Select the latest `exports/unifi_access_users_YYYYMMDD_HHMMSS.csv`.
-4. Confirm comma delimiter and UTF-8 encoding.
-
-SharePoint or Microsoft Lists:
-
-1. Create a new List from CSV or import the CSV into an existing List.
-2. Use `employee_number` or `email` as the human-readable match key.
-3. Store `id` as the UniFi Access user identifier after first match.
-4. Keep `access_policy_ids` and `group_ids` as text columns unless you have a controlled lookup model.
-
-For recurring inventory updates, prefer an automation layer such as Power Automate, n8n, or Node-RED that consumes the normalized JSON or CSV and updates a controlled List.
-
-## Future Sync Modes
-
-Recommended progression:
-
-1. Export-only inventory from UniFi Access.
-2. One-way UniFi Access -> Microsoft Lists/SharePoint inventory sync.
-3. Controlled source-of-truth -> UniFi Access provisioning.
-
-Do not enable bidirectional identity sync without a complete conflict-resolution design. UniFi Access, HR systems, Microsoft Lists, SharePoint, Home Assistant, and workflow middleware can all disagree about user lifecycle state. A bad sync design can re-enable offboarded users, delete valid users, overwrite access policies, or create duplicate identities.
-
-Use stable match keys:
-
-- Prefer `employee_number` when present and governed.
-- Use `email` when it is unique and stable.
-- Store the UniFi Access `id` after first match.
-
-Offboarding should deactivate or suspend users first, not delete them. Delete operations should require explicit review.
-
-Home Assistant should be treated as an event and automation layer, not the source of truth for identity lifecycle. Node-RED and n8n are good middleware options for approval routing, notifications, and human-in-the-loop workflows.
+The test suite covers the preserved exporter behavior and focused Phase 1 application behavior.

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h1>Admin Dashboard</h1>
+  <div class="stats">
+    {% for label, value in stats.items() %}
+      <div class="stat"><strong>{{ value }}</strong>{{ label.replace("_", " ").title() }}</div>
+    {% endfor %}
+  </div>
+  <p class="actions">
+    <a class="button" href="/admin/requests">Requests</a>
+    <a class="button" href="/admin/users">Users</a>
+    <a class="button" href="/admin/companies">Companies</a>
+    <a class="button" href="/admin/suites">Suites</a>
+    <a class="button" href="/admin/company-suites">Occupancy</a>
+    <a class="button" href="/admin/access-profiles">Access Profiles</a>
+    <a class="button" href="/admin/conflicts">Conflicts</a>
+    <a class="button" href="/admin/sync-jobs">Sync Jobs</a>
+  </p>
+</section>
+<section class="panel">
+  <h2>Recent Sync Jobs</h2>
+  <table><tr><th>ID</th><th>Type</th><th>Status</th><th>Created</th></tr>
+  {% for job in recent_sync_jobs %}<tr><td>{{ job.id }}</td><td>{{ job.job_type }}</td><td>{{ job.status }}</td><td>{{ job.created_at }}</td></tr>{% endfor %}
+  </table>
+</section>
+{% endblock %}
+

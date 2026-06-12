@@ -1,28 +1,78 @@
 services:
-  unifi-access-exporter:
+  web:
     build:
       context: .
       dockerfile: Dockerfile
-    image: unifi-access-exporter:local
-    container_name: unifi-access-exporter
+    image: building-access-registry:local
+    container_name: building-access-registry-web
     environment:
-      UNIFI_ACCESS_BASE_URL: ${UNIFI_ACCESS_BASE_URL}
-      UNIFI_ACCESS_TOKEN: ${UNIFI_ACCESS_TOKEN}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://building_access:change_me@db:5432/building_access_registry}
+      APP_SECRET_KEY: ${APP_SECRET_KEY}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      AUTH_MODE: ${AUTH_MODE:-local}
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      EXPORT_DIR: /app/exports
+      UNIFI_ACCESS_BASE_URL: ${UNIFI_ACCESS_BASE_URL:-https://192.168.1.1:12445}
+      UNIFI_ACCESS_TOKEN: ${UNIFI_ACCESS_TOKEN:-}
       UNIFI_ACCESS_VERIFY_SSL: ${UNIFI_ACCESS_VERIFY_SSL:-false}
       UNIFI_ACCESS_PAGE_SIZE: ${UNIFI_ACCESS_PAGE_SIZE:-100}
-      OUTPUT_DIR: /app/exports
-      EXPORT_CSV: ${EXPORT_CSV:-true}
-      EXPORT_JSON: ${EXPORT_JSON:-true}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      SYNC_MODE: ${SYNC_MODE:-export_only}
-      SOURCE_OF_TRUTH: ${SOURCE_OF_TRUTH:-unifi_access}
       ENABLE_WRITES: ${ENABLE_WRITES:-false}
-      MICROSOFT_LIST_WEBHOOK_URL: ${MICROSOFT_LIST_WEBHOOK_URL:-}
-      HOME_ASSISTANT_WEBHOOK_URL: ${HOME_ASSISTANT_WEBHOOK_URL:-}
-      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-}
+      SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-300}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_FROM_NAME: "${SMTP_FROM_NAME:-Building Access Registry}"
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      ENABLE_EMAIL: ${ENABLE_EMAIL:-false}
+      REPORT_DEFAULT_RECIPIENTS: ${REPORT_DEFAULT_RECIPIENTS:-}
+      REPORT_VERIFICATION_EXPIRATION_DAYS: ${REPORT_VERIFICATION_EXPIRATION_DAYS:-14}
+      ENABLE_SCHEDULED_REPORTS: ${ENABLE_SCHEDULED_REPORTS:-false}
+      REPORT_SCHEDULE_CRON: "${REPORT_SCHEDULE_CRON:-0 8 1 * *}"
+      REPORT_TIMEZONE: ${REPORT_TIMEZONE:-America/New_York}
+      REPORT_DEFAULT_TYPE: ${REPORT_DEFAULT_TYPE:-full_building_access}
+    ports:
+      - "8080:8080"
     volumes:
-      - unifi_access_exports:/app/exports
-    restart: "no"
+      - /mnt/unas/docker-exports/building-access-registry:/app/exports
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: building-access-registry:local
+    container_name: building-access-registry-worker
+    command: ["python", "-m", "app.sync_worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://building_access:change_me@db:5432/building_access_registry}
+      APP_SECRET_KEY: ${APP_SECRET_KEY}
+      EXPORT_DIR: /app/exports
+      ENABLE_WRITES: ${ENABLE_WRITES:-false}
+      ENABLE_EMAIL: ${ENABLE_EMAIL:-false}
+      SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-300}
+    volumes:
+      - /mnt/unas/docker-exports/building-access-registry:/app/exports
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    container_name: building-access-registry-db
+    environment:
+      POSTGRES_DB: building_access_registry
+      POSTGRES_USER: building_access
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - building_access_registry_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
 
 volumes:
-  unifi_access_exports:
+  building_access_registry_pgdata:

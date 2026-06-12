@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h1>Request #{{ access_request.id }}</h1>
+  <p><strong>Status:</strong> {{ access_request.status }}</p>
+  <p><strong>Person:</strong> {{ access_request.requested_for_first_name }} {{ access_request.requested_for_last_name }} ({{ access_request.requested_for_email }})</p>
+  <p><strong>Requested company/suite:</strong> {{ access_request.requested_for_company_text or "" }} / {{ access_request.requested_for_suite_text or "" }}</p>
+  <p><strong>Reason:</strong> {{ access_request.reason or "" }}</p>
+  <form method="post" action="/admin/requests/{{ access_request.id }}/approve" class="grid-form">
+    <label>Company
+      <select name="requested_for_company_id"><option value="">Unmapped</option>{% for company in companies %}<option value="{{ company.id }}">{{ company.name }}</option>{% endfor %}</select>
+    </label>
+    <label>Suite
+      <select name="requested_for_suite_id"><option value="">Unmapped</option>{% for suite in suites %}<option value="{{ suite.id }}">{{ suite.suite_number }}</option>{% endfor %}</select>
+    </label>
+    <label>Access profile
+      <select name="requested_access_profile_id"><option value="">None</option>{% for profile in profiles %}<option value="{{ profile.id }}">{{ profile.name }}</option>{% endfor %}</select>
+    </label>
+    <label class="wide">Admin notes <textarea name="admin_notes">{{ access_request.admin_notes or "" }}</textarea></label>
+    <button type="submit">Approve and queue dry run</button>
+  </form>
+  <form method="post" action="/admin/requests/{{ access_request.id }}/deny" class="grid-form">
+    <label>Denial reason <input name="denial_reason" required></label>
+    <button class="danger" type="submit">Deny</button>
+  </form>
+  <form method="post" action="/admin/requests/{{ access_request.id }}/needs-info"><button class="secondary" type="submit">Needs info</button></form>
+  <form method="post" action="/admin/requests/{{ access_request.id }}/sync"><button type="submit">Run dry-run sync</button></form>
+</section>
+{% endblock %}
+

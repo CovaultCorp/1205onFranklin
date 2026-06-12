@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h1>Access Request</h1>
+  <form method="post" class="grid-form">
+    <label>Request type
+      <select name="request_type">
+        <option value="new_access">New access</option>
+        <option value="change_access">Change access</option>
+        <option value="offboarding">Offboarding</option>
+        <option value="temporary_access">Temporary access</option>
+        <option value="lost_badge">Lost badge</option>
+      </select>
+    </label>
+    <label>First name <input name="requested_for_first_name" required></label>
+    <label>Last name <input name="requested_for_last_name" required></label>
+    <label>Email <input name="requested_for_email" type="email" required></label>
+    <label>Employee number <input name="requested_for_employee_number"></label>
+    <label>Company <input name="requested_for_company_text"></label>
+    <label>Suite <input name="requested_for_suite_text"></label>
+    <label>Department <input name="requested_for_department"></label>
+    <label>Start date <input name="requested_start_date" type="date"></label>
+    <label>End date <input name="requested_end_date" type="date"></label>
+    <label class="wide">Reason <textarea name="reason"></textarea></label>
+    <label>Requester name <input name="requester_name" required></label>
+    <label>Requester email <input name="requester_email" type="email" required></label>
+    <button type="submit">Submit request</button>
+  </form>
+</section>
+{% endblock %}
+

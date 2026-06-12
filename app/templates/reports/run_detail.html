@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h1>Report Run #{{ run.id }}</h1>
+  <p>Status: {{ run.status }}</p>
+  <p>{{ run.last_error or "" }}</p>
+  <p><a class="button" href="/admin/reports/runs/{{ run.id }}/download-csv">Download CSV</a></p>
+  <form method="post" action="/admin/reports/runs/{{ run.id }}/resend" class="grid-form">
+    <label>Recipient email <input name="recipient_email" type="email" value="{{ run.recipient_email or "" }}" required></label>
+    <button type="submit">Resend or preview email</button>
+  </form>
+  <div class="report-preview">{{ report_html|safe }}</div>
+</section>
+{% endblock %}
+

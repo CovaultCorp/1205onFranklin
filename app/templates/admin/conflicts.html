@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h1>Conflicts</h1>
+  <table><tr><th>ID</th><th>Type</th><th>Description</th><th>Status</th><th>Resolve</th></tr>
+  {% for conflict in conflicts %}
+    <tr><td>{{ conflict.id }}</td><td>{{ conflict.conflict_type }}</td><td>{{ conflict.description }}</td><td>{{ conflict.status }}</td><td><form method="post" action="/admin/conflicts/{{ conflict.id }}/resolve"><input name="status" value="resolved"><button type="submit">Save</button></form></td></tr>
+  {% endfor %}
+  </table>
+</section>
+{% endblock %}
+

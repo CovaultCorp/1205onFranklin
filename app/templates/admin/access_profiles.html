@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h1>Access Profiles</h1>
+  <form method="post" class="grid-form">
+    <label>Name <input name="name" required></label>
+    <label>Policy IDs <input name="unifi_access_policy_ids" placeholder="comma-separated"></label>
+    <label>Group IDs <input name="unifi_user_group_ids" placeholder="comma-separated"></label>
+    <label class="wide">Description <textarea name="description"></textarea></label>
+    <button type="submit">Add profile</button>
+  </form>
+  <table><tr><th>Name</th><th>Policy IDs</th><th>Group IDs</th><th>Active</th></tr>
+  {% for profile in profiles %}<tr><td>{{ profile.name }}</td><td>{{ profile.unifi_access_policy_ids|join(", ") }}</td><td>{{ profile.unifi_user_group_ids|join(", ") }}</td><td>{{ profile.active }}</td></tr>{% endfor %}
+  </table>
+</section>
+{% endblock %}
+
