@@ -33,7 +33,7 @@ services:
       REPORT_TIMEZONE: ${REPORT_TIMEZONE:-America/New_York}
       REPORT_DEFAULT_TYPE: ${REPORT_DEFAULT_TYPE:-full_building_access}
     ports:
-      - "8080:8080"
+      - "8083:8080"
     volumes:
       - /mnt/unas/docker-exports/building-access-registry:/app/exports
     depends_on:
