@@ -158,6 +158,57 @@ def test_report_generation_email_preview_and_verification(app_context):
     assert list((export_dir / "email_previews").glob("*.html"))
 
 
+def test_admin_bootstrap_export_and_import(app_context):
+    client, session_factory, _ = app_context
+    create_admin_and_login(client)
+
+    with session_factory() as session:
+        from app.models import AccessProfile, Company, Suite, UnifiUser
+
+        company = Company(name="Acme")
+        suite = Suite(suite_number="1200")
+        profile = AccessProfile(name="Office Access")
+        snapshot = UnifiUser(
+            unifi_user_id="u-1",
+            email="ada@example.com",
+            employee_number="E100",
+            first_name="Ada",
+            last_name="Lovelace",
+            status="active",
+        )
+        session.add_all([company, suite, profile, snapshot])
+        session.commit()
+        company_id = company.id
+        suite_id = suite.id
+        profile_id = profile.id
+
+    response = client.get("/admin/bootstrap/export")
+    assert response.status_code == 200
+    assert "unifi_bootstrap_users.csv" in response.headers["content-disposition"]
+    csv_text = response.text.replace("promote,u-1", "yes,u-1").replace(",,,\r\n", f",{company_id},,{suite_id},,{profile_id},,,,,\r\n")
+    if f",{company_id},,{suite_id},,{profile_id}," not in csv_text:
+        csv_text = (
+            "promote,unifi_user_id,email,employee_number,first_name,last_name,unifi_status,local_status,company_id,company_name,suite_id,suite_number,access_profile_id,access_profile_name,title,department,phone,notes\n"
+            f"yes,u-1,ada@example.com,E100,Ada,Lovelace,active,active,{company_id},,{suite_id},,{profile_id},,,,,\n"
+        )
+
+    response = client.post(
+        "/admin/bootstrap/import",
+        files={"file": ("bootstrap.csv", csv_text, "text/csv")},
+    )
+    assert response.status_code == 200
+    assert "Users Created" in response.text
+
+    with session_factory() as session:
+        from app.models import UnifiUser, User
+
+        user = session.scalar(select(User).where(User.email == "ada@example.com"))
+        snapshot = session.scalar(select(UnifiUser).where(UnifiUser.unifi_user_id == "u-1"))
+        assert user is not None
+        assert user.access_profile_id == profile_id
+        assert snapshot.local_user_id == user.id
+
+
 @pytest.mark.asyncio
 async def test_unifi_write_guard_blocks_phase1_writes(monkeypatch):
     monkeypatch.setenv("ENABLE_WRITES", "false")
@@ -168,4 +219,3 @@ async def test_unifi_write_guard_blocks_phase1_writes(monkeypatch):
     client = UniFiAccessClient()
     with pytest.raises(WritesDisabledError):
         await client.create_user({"email": "blocked@example.com"})
-

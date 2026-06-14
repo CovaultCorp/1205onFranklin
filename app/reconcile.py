@@ -110,9 +110,9 @@ def _is_unifi_active(status: str | None) -> bool:
 
 
 def _desired_policy_ids(session: Session, local_user: User) -> list[str]:
-    profile = None
+    profile = local_user.access_profile
     if local_user.primary_suite_id is not None:
-        profile = session.scalar(
+        profile = profile or session.scalar(
             select(AccessProfile).where(
                 AccessProfile.active.is_(True),
                 AccessProfile.default_for_suite_id == local_user.primary_suite_id,
@@ -152,6 +152,7 @@ def _local_state(local_user: User | None) -> dict[str, Any] | None:
         "status": local_user.status,
         "company_id": local_user.company_id,
         "primary_suite_id": local_user.primary_suite_id,
+        "access_profile_id": local_user.access_profile_id,
     }
 
 

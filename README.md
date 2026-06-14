@@ -43,6 +43,7 @@ Implemented:
 - Dry-run `SyncJob(job_type="reconcile")` records containing proposed actions only.
 - Admin “Run UniFi Reconciliation” action, reconciliation summary, improved conflict view, and improved sync job view.
 - CLI entry point: `python scripts/run_reconcile.py`.
+- Local-only bootstrap workflow to promote unmatched UniFi snapshots into local `User` records through CSV assignment import.
 
 Not implemented in Phase 2:
 
@@ -50,6 +51,31 @@ Not implemented in Phase 2:
 - NFC, PIN, Touch Pass, or raw credential storage.
 - Automatic conflict resolution.
 - Scheduled reconciliation.
+
+## Bootstrap Unmatched UniFi Users
+
+After running read-only reconciliation, go to:
+
+```text
+/admin/bootstrap
+```
+
+Workflow:
+
+1. Download `unifi_bootstrap_users.csv`.
+2. Fill in `promote=yes` for rows to import.
+3. Assign each promoted row to existing local company, suite, and access profile records using either IDs or names.
+4. Upload the completed CSV.
+
+CSV import:
+
+- Creates local `User` records only when no matching user exists.
+- Matches existing local users by employee number, then email to avoid duplicates.
+- Sets `company_id`, `primary_suite_id`, and `access_profile_id`.
+- Creates a primary `UserSuiteAssignment`.
+- Links the `UnifiUser` snapshot to the local user.
+- Writes audit logs.
+- Does not call UniFi write APIs.
 
 ## Required Environment Variables
 
@@ -161,6 +187,7 @@ Supply environment variables in Portainer stack settings. Keep `ENABLE_WRITES=fa
 - Email disabled mode writes preview files to `EXPORT_DIR/email_previews`.
 - Approval creates `SyncJob` records and audit logs; it does not provision directly.
 - Reconciliation creates local snapshots, open conflicts, and dry-run proposed actions only. It does not call UniFi write APIs.
+- Bootstrap import creates or links local registry records only. It does not provision or modify UniFi users.
 
 ## Tests
 

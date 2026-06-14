@@ -16,7 +16,7 @@ UniFi Access is the target access-control system.
 
 ## Implementation status
 
-Phase 1 and Phase 2 are implemented in this repository: local registry models, request portal, admin UI, reporting, email preview mode, Docker stack, dry-run-only UniFi stubs, read-only UniFi reconciliation, local UniFi snapshots, conflict detection, and dry-run proposed sync jobs. Phase 3 through Phase 4 remain future work.
+Phase 1 and Phase 2 are implemented in this repository: local registry models, request portal, admin UI, reporting, email preview mode, Docker stack, dry-run-only UniFi stubs, read-only UniFi reconciliation, local UniFi snapshots, conflict detection, dry-run proposed sync jobs, and a local-only bootstrap workflow for promoting unmatched UniFi snapshots into local users. Phase 3 through Phase 4 remain future work.
 
 ## Primary goals
 
@@ -215,6 +215,7 @@ Fields:
 * employee_number
 * company_id
 * primary_suite_id
+* access_profile_id
 * title
 * phone
 * department
@@ -605,6 +606,28 @@ Detect:
 * User belongs to inactive company
 * User assigned to inactive suite
 
+## Bootstrap workflow
+
+The bootstrap workflow supports initial population of the local registry from read-only UniFi snapshots.
+
+Rules:
+
+* Bootstrap operates on local database records only.
+* Bootstrap must not call UniFi write APIs.
+* Only unmatched `UnifiUser` snapshots are exported.
+* CSV import promotes only rows explicitly marked with `promote=yes`.
+* CSV import must resolve company, suite, and access profile to existing local records.
+* CSV import must not create duplicate users; existing users are matched by employee number, then email.
+* CSV import links the `UnifiUser` snapshot to the created or existing local `User`.
+* CSV import creates a primary `UserSuiteAssignment`.
+* CSV import creates `AuditLog` records.
+
+Required bootstrap routes:
+
+* GET /admin/bootstrap
+* GET /admin/bootstrap/export
+* POST /admin/bootstrap/import
+
 ## Admin dashboard
 
 Show:
@@ -665,6 +688,9 @@ Admin:
 * POST /admin/conflicts/{id}/resolve
 * GET /admin/sync-jobs
 * POST /admin/reconcile/run
+* GET /admin/bootstrap
+* GET /admin/bootstrap/export
+* POST /admin/bootstrap/import
 
 Reports:
 

@@ -78,6 +78,7 @@ class User(TimestampMixin, Base):
     employee_number: Mapped[str | None] = mapped_column(String(120), unique=True)
     company_id: Mapped[int | None] = mapped_column(ForeignKey("companies.id"))
     primary_suite_id: Mapped[int | None] = mapped_column(ForeignKey("suites.id"))
+    access_profile_id: Mapped[int | None] = mapped_column(ForeignKey("access_profiles.id"))
     title: Mapped[str | None] = mapped_column(String(255))
     phone: Mapped[str | None] = mapped_column(String(64))
     department: Mapped[str | None] = mapped_column(String(255))
@@ -88,6 +89,7 @@ class User(TimestampMixin, Base):
 
     company: Mapped[Company | None] = relationship()
     primary_suite: Mapped[Suite | None] = relationship()
+    access_profile: Mapped[AccessProfile | None] = relationship()
 
 
 class UserSuiteAssignment(TimestampMixin, Base):
@@ -247,4 +249,3 @@ class VerificationRequest(TimestampMixin, Base):
     verified_by_email: Mapped[str | None] = mapped_column(String(255))
     comments: Mapped[str | None] = mapped_column(Text)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-

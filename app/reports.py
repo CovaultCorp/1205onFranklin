@@ -53,7 +53,7 @@ def _user_rows(session: Session, *, company_id: int | None = None, suite_id: int
                 "Company": company.name if company else "",
                 "Suite": suite.suite_number if suite else "",
                 "Status": user.status,
-                "Access profile": "",
+                "Access profile": user.access_profile.name if user.access_profile else "",
                 "UniFi status": "",
                 "Last verified date": user.last_verified_at.date().isoformat() if user.last_verified_at else "",
                 "Notes": user.notes or "",
@@ -142,4 +142,3 @@ def send_report(session: Session, run: ReportRun, recipient_email: str) -> None:
     except Exception as exc:
         run.status = "failed"
         run.last_error = str(exc)
-

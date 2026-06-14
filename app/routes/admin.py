@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.audit import audit
 from app.db import get_session
+from app.import_export import export_unmatched_unifi_users_csv, import_bootstrap_users_csv
 from app.models import (
     AccessProfile,
     AccessRequest,
@@ -61,6 +62,10 @@ def dashboard(
         "open_conflicts": session.scalar(select(func.count(Conflict.id)).where(Conflict.status == "open")) or 0,
         "sync_failures": session.scalar(select(func.count(SyncJob.id)).where(SyncJob.status == "failed")) or 0,
         "unifi_snapshots": session.scalar(select(func.count(UnifiUser.id))) or 0,
+        "unmatched_unifi_snapshots": session.scalar(
+            select(func.count(UnifiUser.id)).where(UnifiUser.local_user_id.is_(None))
+        )
+        or 0,
     }
     return templates.TemplateResponse(
         request,
@@ -330,3 +335,72 @@ async def run_reconcile(session: Session = Depends(get_session), account: Portal
     await run_unifi_reconciliation(session)
     session.commit()
     return RedirectResponse("/admin/sync-jobs", status_code=303)
+
+
+@router.get("/bootstrap", response_class=HTMLResponse)
+def bootstrap_users(
+    request: Request,
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(require_admin),
+):
+    unmatched = session.scalars(
+        select(UnifiUser).where(UnifiUser.local_user_id.is_(None)).order_by(UnifiUser.email, UnifiUser.unifi_user_id)
+    ).all()
+    return templates.TemplateResponse(
+        request,
+        "admin/bootstrap.html",
+        {
+            "account": account,
+            "unmatched": unmatched,
+            "companies": session.scalars(select(Company).order_by(Company.name)).all(),
+            "suites": session.scalars(select(Suite).order_by(Suite.suite_number)).all(),
+            "profiles": session.scalars(select(AccessProfile).order_by(AccessProfile.name)).all(),
+            "summary": None,
+        },
+    )
+
+
+@router.get("/bootstrap/export")
+def export_bootstrap_users(
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(require_admin),
+):
+    csv_text = export_unmatched_unifi_users_csv(session)
+    return Response(
+        csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="unifi_bootstrap_users.csv"'},
+    )
+
+
+@router.post("/bootstrap/import", response_class=HTMLResponse)
+async def import_bootstrap_users(
+    request: Request,
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(require_admin),
+):
+    csv_text = (await file.read()).decode("utf-8-sig")
+    summary = import_bootstrap_users_csv(
+        session,
+        csv_text,
+        actor_account_id=account.id,
+        actor_email=account.email,
+        ip_address=request.client.host if request.client else None,
+    )
+    session.commit()
+    unmatched = session.scalars(
+        select(UnifiUser).where(UnifiUser.local_user_id.is_(None)).order_by(UnifiUser.email, UnifiUser.unifi_user_id)
+    ).all()
+    return templates.TemplateResponse(
+        request,
+        "admin/bootstrap.html",
+        {
+            "account": account,
+            "unmatched": unmatched,
+            "companies": session.scalars(select(Company).order_by(Company.name)).all(),
+            "suites": session.scalars(select(Suite).order_by(Suite.suite_number)).all(),
+            "profiles": session.scalars(select(AccessProfile).order_by(AccessProfile.name)).all(),
+            "summary": summary,
+        },
+    )
