@@ -1,6 +1,6 @@
 """Add UniFi exporter compatibility snapshot fields.
 
-Revision ID: 0004_unifi_user_exporter_compat_fields
+Revision ID: 0004_unifi_compat
 Revises: 0003_user_desired_unifi_access
 Create Date: 2026-06-16
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0004_unifi_user_exporter_compat_fields"
+revision = "0004_unifi_compat"
 down_revision = "0003_user_desired_unifi_access"
 branch_labels = None
 depends_on = None
