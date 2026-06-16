@@ -25,7 +25,7 @@ The app should track:
 * Which users have building access
 * Which company each user belongs to
 * Which suite/location each user belongs to
-* What access profile each user should have
+* What access profile or desired UniFi Access Policy/User Group each user should have
 * Whether a user is active, inactive, pending, or offboarded
 * Whether user/company/suite data has recently been verified
 * Which access requests are pending, approved, denied, synced, failed, or conflicted
@@ -216,6 +216,10 @@ Fields:
 * company_id
 * primary_suite_id
 * access_profile_id
+* desired_unifi_access_policy_ids
+* desired_unifi_access_policy_names
+* desired_unifi_user_group_ids
+* desired_unifi_user_group_names
 * title
 * phone
 * department
@@ -474,6 +478,10 @@ Columns:
 * Status
 * Access profile
 * UniFi status
+* Current UniFi Access Policies
+* Desired UniFi Access Policies
+* Current UniFi User Groups
+* Desired UniFi User Groups
 * Last verified date
 * Notes
 
@@ -491,6 +499,10 @@ Columns:
 * Status
 * Access profile
 * UniFi status
+* Current UniFi Access Policies
+* Desired UniFi Access Policies
+* Current UniFi User Groups
+* Desired UniFi User Groups
 * Last verified date
 * Notes
 
@@ -608,27 +620,32 @@ Detect:
 
 ## Bootstrap workflow
 
-The bootstrap workflow supports initial population of the local registry from read-only UniFi snapshots.
+The bootstrap workflow supports initial population and cleanup of the local registry from read-only UniFi snapshots.
 
 Rules:
 
 * Bootstrap operates on local database records only.
 * Bootstrap must not call UniFi write APIs.
-* Only unmatched `UnifiUser` snapshots are exported.
-* CSV import promotes only rows explicitly marked with `promote=yes`.
-* Reference export must provide companies, suites, local access profiles, UniFi access policies, UniFi user groups, and unmatched UniFi users in a ZIP.
-* CSV import must resolve company, suite, and access profile to existing local records by ID or by name/number.
+* `/admin/bootstrap/export` exports all locally stored `UnifiUser` snapshots to `all_unifi_users.csv`, including linked and unlinked users.
+* CSV import promotes unlinked snapshots only when explicitly marked with `promote=yes`.
+* CSV import updates linked local users only when explicitly marked with `update_existing=yes`.
+* CSV import skips rows where both `promote` and `update_existing` are blank.
+* Reference export must provide companies, suites, UniFi access policies, UniFi user groups, and all UniFi users in a ZIP.
+* CSV import must resolve company and suite to existing local records by ID or by name/number.
+* CSV import must resolve desired UniFi Access Policy and UniFi User Group selections by ID or by name.
 * CSV import must reject a row when name/number lookup is missing or ambiguous.
 * CSV import must not create duplicate users; existing users are matched by employee number, then email.
 * CSV import links the `UnifiUser` snapshot to the created or existing local `User`.
 * CSV import creates a primary `UserSuiteAssignment`.
 * CSV import creates `AuditLog` records.
+* Bootstrap UI must use the user-facing terms Company, Suite, UniFi Access Policy, and UniFi User Group.
+* UniFi Access does not use the app's internal `AccessProfile` field; access profiles remain optional local templates and are not required for bootstrap.
 
 Required bootstrap routes:
 
 * GET /admin/bootstrap
 * GET /admin/bootstrap/reference-export
-* GET /admin/bootstrap/export redirects to `/admin/bootstrap/reference-export`
+* GET /admin/bootstrap/export
 * POST /admin/bootstrap/import
 
 ## Admin dashboard

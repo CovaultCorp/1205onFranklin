@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import importlib
+import csv
 from pathlib import Path
 import zipfile
 
@@ -122,20 +123,35 @@ def test_report_generation_email_preview_and_verification(app_context):
     create_admin_and_login(client)
 
     with session_factory() as session:
-        from app.models import Company, Suite, User
+        from app.models import Company, Suite, UnifiUser, User
 
         company = Company(name="Globex")
         suite = Suite(suite_number="500")
         session.add_all([company, suite])
         session.flush()
+        user = User(
+            first_name="Grace",
+            last_name="Hopper",
+            email="grace@example.com",
+            company_id=company.id,
+            primary_suite_id=suite.id,
+            status="active",
+            desired_unifi_access_policy_names=["Suite 500"],
+            desired_unifi_user_group_names=["Employees"],
+        )
+        session.add(user)
+        session.flush()
         session.add(
-            User(
-                first_name="Grace",
-                last_name="Hopper",
+            UnifiUser(
+                local_user_id=user.id,
+                unifi_user_id="u-grace",
                 email="grace@example.com",
-                company_id=company.id,
-                primary_suite_id=suite.id,
                 status="active",
+                access_policy_ids=["policy-1"],
+                raw_snapshot_json={
+                    "access_policy": [{"id": "policy-1", "name": "Front Door"}],
+                    "groups": [{"id": "group-1", "name": "Staff"}],
+                },
             )
         )
         session.commit()
@@ -153,8 +169,14 @@ def test_report_generation_email_preview_and_verification(app_context):
 
         run = session.scalar(select(ReportRun))
         verification = session.scalar(select(VerificationRequest))
+        csv_text = Path(run.output_csv_path).read_text(encoding="utf-8")
         assert run.status == "sent"
-        assert Path(run.output_csv_path).read_text(encoding="utf-8").startswith("Full name,Email")
+        assert csv_text.startswith("Full name,Email")
+        assert "Current UniFi Access Policies" in csv_text
+        assert "Front Door" in csv_text
+        assert "Suite 500" in csv_text
+        assert "Staff" in csv_text
+        assert "Employees" in csv_text
         assert verification is not None
         assert verification.status == "pending"
 
@@ -166,11 +188,10 @@ def test_admin_bootstrap_export_and_import(app_context):
     create_admin_and_login(client)
 
     with session_factory() as session:
-        from app.models import AccessProfile, Company, Suite, UnifiUser
+        from app.models import Company, Suite, UnifiUser
 
         company = Company(name="Acme")
         suite = Suite(suite_number="1200")
-        profile = AccessProfile(name="Office Access")
         snapshot = UnifiUser(
             unifi_user_id="u-1",
             email="ada@example.com",
@@ -178,28 +199,59 @@ def test_admin_bootstrap_export_and_import(app_context):
             first_name="Ada",
             last_name="Lovelace",
             status="active",
+            access_policy_ids=["policy-1"],
+            raw_snapshot_json={"groups": [{"id": "group-1", "name": "Employees"}]},
         )
-        session.add_all([company, suite, profile, snapshot])
+        session.add_all([company, suite, snapshot])
         session.commit()
         company_id = company.id
         suite_id = suite.id
-        profile_id = profile.id
 
-    response = client.get("/admin/bootstrap/export", follow_redirects=False)
-    assert response.status_code == 303
-    assert response.headers["location"] == "/admin/bootstrap/reference-export"
+    response = client.get("/admin/bootstrap")
+    assert response.status_code == 200
+    assert "UniFi Access does not use the app" in response.text
+    assert "internal Access Profile field" in response.text
+
+    response = client.get("/admin/bootstrap/export")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert response.headers["content-disposition"] == 'attachment; filename="all_unifi_users.csv"'
+    rows = list(csv.DictReader(io.StringIO(response.text)))
+    assert rows[0]["unifi_user_id"] == "u-1"
 
     response = client.get("/admin/bootstrap/reference-export")
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/zip"
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
-        assert "unmatched_unifi_users.csv" in archive.namelist()
-        assert "companies.csv" in archive.namelist()
+        assert set(archive.namelist()) == {
+            "all_unifi_users.csv",
+            "companies.csv",
+            "suites.csv",
+            "unifi_access_policies.csv",
+            "unifi_user_groups.csv",
+        }
 
-    csv_text = (
-        "unifi_user_id,first_name,last_name,full_name,email,employee_number,unifi_status,current_unifi_access_policy_ids,current_unifi_access_policy_names,current_unifi_user_group_ids,current_unifi_user_group_names,promote,company_id,company_name,suite_id,suite_number,access_profile_id,access_profile_name,notes\n"
-        f"u-1,Ada,Lovelace,Ada Lovelace,ada@example.com,E100,active,,,,,yes,{company_id},,{suite_id},,{profile_id},,Imported from bootstrap\n"
+    from app.import_export import BOOTSTRAP_COLUMNS
+
+    csv_output = io.StringIO()
+    writer = csv.DictWriter(csv_output, fieldnames=BOOTSTRAP_COLUMNS, extrasaction="ignore", lineterminator="\n")
+    writer.writeheader()
+    writer.writerow(
+        {
+            "unifi_user_id": "u-1",
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "email": "ada@example.com",
+            "employee_number": "E100",
+            "promote": "yes",
+            "company_id": str(company_id),
+            "suite_id": str(suite_id),
+            "desired_unifi_access_policy_ids": "policy-1",
+            "desired_unifi_user_group_ids": "group-1",
+            "notes": "Imported from bootstrap",
+        }
     )
+    csv_text = csv_output.getvalue()
 
     response = client.post(
         "/admin/bootstrap/import",
@@ -214,7 +266,9 @@ def test_admin_bootstrap_export_and_import(app_context):
         user = session.scalar(select(User).where(User.email == "ada@example.com"))
         snapshot = session.scalar(select(UnifiUser).where(UnifiUser.unifi_user_id == "u-1"))
         assert user is not None
-        assert user.access_profile_id == profile_id
+        assert user.access_profile_id is None
+        assert user.desired_unifi_access_policy_ids == ["policy-1"]
+        assert user.desired_unifi_user_group_ids == ["group-1"]
         assert snapshot.local_user_id == user.id
 
 

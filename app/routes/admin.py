@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.audit import audit
 from app.db import get_session
-from app.import_export import build_bootstrap_reference_zip, import_bootstrap_users_csv
+from app.import_export import build_bootstrap_reference_zip, export_all_unifi_users_csv, import_bootstrap_users_csv
 from app.models import (
     AccessProfile,
     AccessRequest,
@@ -362,11 +362,21 @@ def bootstrap_users(
 
 
 @router.get("/bootstrap/export")
-def export_bootstrap_users_compat(
+async def export_bootstrap_users(
     session: Session = Depends(get_session),
     account: PortalAccount = Depends(require_admin),
 ):
-    return RedirectResponse("/admin/bootstrap/reference-export", status_code=303)
+    unifi_client = UniFiAccessClient()
+    csv_text = export_all_unifi_users_csv(
+        session,
+        unifi_access_policies=await unifi_client.list_access_policies(),
+        unifi_user_groups=await unifi_client.list_user_groups(),
+    )
+    return Response(
+        csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="all_unifi_users.csv"'},
+    )
 
 
 @router.get("/bootstrap/reference-export")
@@ -395,9 +405,12 @@ async def import_bootstrap_users(
     account: PortalAccount = Depends(require_admin),
 ):
     csv_text = (await file.read()).decode("utf-8-sig")
+    unifi_client = UniFiAccessClient()
     summary = import_bootstrap_users_csv(
         session,
         csv_text,
+        unifi_access_policies=await unifi_client.list_access_policies(),
+        unifi_user_groups=await unifi_client.list_user_groups(),
         actor_account_id=account.id,
         actor_email=account.email,
         ip_address=request.client.host if request.client else None,

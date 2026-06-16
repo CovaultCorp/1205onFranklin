@@ -2,13 +2,30 @@
 {% block content %}
 <section class="panel">
   <h1>Bootstrap Users From UniFi</h1>
-  <p>Download reference data, complete unmatched_unifi_users.csv, then upload it to create or link local users. This workflow updates the local registry only.</p>
-  <p><a class="button" href="/admin/bootstrap/reference-export">Download Reference ZIP</a></p>
+  <p>Run UniFi reconciliation first, then export all UniFi users, complete the local registry columns, and import the CSV. This workflow updates the local registry only.</p>
+  <p class="actions">
+    <a class="button" href="/admin/bootstrap/export">Export All UniFi Users CSV</a>
+    <a class="button" href="/admin/bootstrap/reference-export">Download Reference ZIP</a>
+  </p>
 
   <form method="post" action="/admin/bootstrap/import" enctype="multipart/form-data" class="grid-form">
     <label class="wide">Completed CSV <input type="file" name="file" accept=".csv,text/csv" required></label>
     <button type="submit">Import assignments</button>
   </form>
+</section>
+
+<section class="panel">
+  <h2>Workflow</h2>
+  <ol>
+    <li>Run UniFi reconciliation first.</li>
+    <li>Export all UniFi users.</li>
+    <li>Open the CSV.</li>
+    <li>For each user to add or update, fill in promote or update_existing, Company, Suite, desired UniFi Access Policy, and desired UniFi User Group columns.</li>
+    <li>Import the CSV.</li>
+    <li>Rerun UniFi reconciliation.</li>
+    <li>Review remaining conflicts.</li>
+  </ol>
+  <p>UniFi Access does not use the app's internal Access Profile field. For bootstrap, use UniFi Access Policy and UniFi User Group columns. Access Profiles are optional local templates that may be used later.</p>
 </section>
 
 {% if summary %}
@@ -41,6 +58,7 @@
     </div>
     <div>
       <h3>Access Profiles</h3>
+      <p>Optional local templates, not required for bootstrap.</p>
       <table><tr><th>ID</th><th>Name</th></tr>{% for profile in profiles %}<tr><td>{{ profile.id }}</td><td>{{ profile.name }}</td></tr>{% endfor %}</table>
     </div>
   </div>

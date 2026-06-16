@@ -43,7 +43,7 @@ Implemented:
 - Dry-run `SyncJob(job_type="reconcile")` records containing proposed actions only.
 - Admin "Run UniFi Reconciliation" action, reconciliation summary, improved conflict view, and improved sync job view.
 - CLI entry point: `python scripts/run_reconcile.py`.
-- Local-only bootstrap reference ZIP and CSV import workflow to promote unmatched UniFi snapshots into local `User` records.
+- Local-only bootstrap CSV and reference ZIP workflow to promote unlinked UniFi snapshots, update linked local users, and store desired UniFi Access Policy/User Group choices.
 
 Not implemented in Phase 2:
 
@@ -52,7 +52,7 @@ Not implemented in Phase 2:
 - Automatic conflict resolution.
 - Scheduled reconciliation.
 
-## Bootstrap Unmatched UniFi Users
+## Bootstrap UniFi Users
 
 After running read-only reconciliation, go to:
 
@@ -62,37 +62,42 @@ After running read-only reconciliation, go to:
 
 Workflow:
 
-1. Download the reference ZIP.
-2. Use `companies.csv`, `suites.csv`, `access_profiles.csv`, `unifi_access_policies.csv`, and `unifi_user_groups.csv` as lookup references.
-3. Complete `unmatched_unifi_users.csv`.
-4. Fill in `promote=yes` for rows to import.
-5. Assign each promoted row to existing local company, suite, and access profile records using either IDs or names.
-6. Upload the completed `unmatched_unifi_users.csv`.
+1. Run UniFi reconciliation so local `UnifiUser` snapshots are current.
+2. Download `all_unifi_users.csv` from `/admin/bootstrap/export`.
+3. Optionally download the reference ZIP from `/admin/bootstrap/reference-export`.
+4. Use `companies.csv`, `suites.csv`, `unifi_access_policies.csv`, and `unifi_user_groups.csv` as lookup references.
+5. Fill in `promote=yes` for unlinked UniFi users to create or link local registry users.
+6. Fill in `update_existing=yes` for linked users whose local registry fields should be updated.
+7. Assign each imported row to existing local Company and Suite records, and desired UniFi Access Policy/User Group values, using either IDs or names.
+8. Upload the completed `all_unifi_users.csv`.
 
 The reference ZIP contains:
 
 ```text
 companies.csv
 suites.csv
-access_profiles.csv
+all_unifi_users.csv
 unifi_access_policies.csv
 unifi_user_groups.csv
-unmatched_unifi_users.csv
 ```
 
 CSV import:
 
 - Creates local `User` records only when no matching user exists.
 - Matches existing local users by employee number, then email to avoid duplicates.
+- Updates linked local users only when `update_existing=yes`.
+- Skips rows where both `promote` and `update_existing` are blank.
 - Resolves `company_id` or `company_name`.
 - Resolves `suite_id` or `suite_number`.
-- Resolves `access_profile_id` or `access_profile_name`.
+- Resolves desired UniFi Access Policy/User Group selections by ID or by name.
 - Rejects rows with missing or ambiguous name lookups.
-- Sets `company_id`, `primary_suite_id`, and `access_profile_id`.
+- Sets `company_id`, `primary_suite_id`, `desired_unifi_access_policy_ids`, and `desired_unifi_user_group_ids`.
 - Creates a primary `UserSuiteAssignment`.
 - Links the `UnifiUser` snapshot to the local user.
 - Writes audit logs.
 - Does not call UniFi write APIs.
+
+UniFi Access does not use the app's internal `AccessProfile` field. Access Profiles remain available as optional local templates for other workflows, but the bootstrap master sheet uses the user-facing Company, Suite, UniFi Access Policy, and UniFi User Group terms.
 
 ## Required Environment Variables
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 import zipfile
 from dataclasses import dataclass, field
 from io import StringIO
@@ -10,32 +11,43 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import AccessProfile, AuditLog, Company, Suite, UnifiUser, User, UserSuiteAssignment
+from app.models import AuditLog, Company, Suite, UnifiUser, User, UserSuiteAssignment
 from app.reconcile import ACTIVE_UNIFI_STATUSES, INACTIVE_UNIFI_STATUSES
 
 COMPANY_FIELDS = ["id", "name", "legal_name", "status", "primary_contact_name", "primary_contact_email", "phone", "notes"]
 SUITE_FIELDS = ["id", "suite_number", "floor", "building_area", "description", "status"]
-ACCESS_PROFILE_FIELDS = ["id", "name", "description", "active", "unifi_access_policy_ids", "unifi_user_group_ids"]
-UNIFI_REFERENCE_FIELDS = ["id", "name"]
+UNIFI_REFERENCE_FIELDS = ["id", "name", "description", "status"]
 BOOTSTRAP_COLUMNS = [
     "unifi_user_id",
+    "linked_local_user_id",
+    "is_linked",
     "first_name",
     "last_name",
     "full_name",
     "email",
     "employee_number",
     "unifi_status",
+    "onboard_time",
     "current_unifi_access_policy_ids",
     "current_unifi_access_policy_names",
     "current_unifi_user_group_ids",
     "current_unifi_user_group_names",
+    "nfc_card_count",
+    "touch_pass_status",
+    "touch_pass_last_activity",
+    "license_plate_count",
+    "raw_snapshot_reference",
     "promote",
+    "update_existing",
     "company_id",
     "company_name",
     "suite_id",
     "suite_number",
-    "access_profile_id",
-    "access_profile_name",
+    "desired_unifi_access_policy_ids",
+    "desired_unifi_access_policy_names",
+    "desired_unifi_user_group_ids",
+    "desired_unifi_user_group_names",
+    "user_status",
     "notes",
 ]
 
@@ -60,29 +72,306 @@ class BootstrapImportSummary:
         }
 
 
-def _norm(value: str | None) -> str:
-    return (value or "").strip()
+def build_bootstrap_reference_zip(
+    session: Session,
+    *,
+    unifi_access_policies: list[dict[str, Any]] | None = None,
+    unifi_user_groups: list[dict[str, Any]] | None = None,
+) -> bytes:
+    policies = unifi_access_policies or []
+    groups = unifi_user_groups or []
+    files = {
+        "all_unifi_users.csv": export_all_unifi_users_csv(
+            session,
+            unifi_access_policies=policies,
+            unifi_user_groups=groups,
+        ),
+        "companies.csv": _csv_text(COMPANY_FIELDS, _company_rows(session)),
+        "suites.csv": _csv_text(SUITE_FIELDS, _suite_rows(session)),
+        "unifi_access_policies.csv": _csv_text(UNIFI_REFERENCE_FIELDS, _unifi_reference_rows(policies)),
+        "unifi_user_groups.csv": _csv_text(UNIFI_REFERENCE_FIELDS, _unifi_reference_rows(groups)),
+    }
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
+        for filename, content in files.items():
+            zip_file.writestr(filename, content)
+    return archive.getvalue()
 
 
-def _norm_lower(value: str | None) -> str:
-    return _normalize_lookup(value)
+def export_all_unifi_users_csv(
+    session: Session,
+    *,
+    unifi_access_policies: list[dict[str, Any]] | None = None,
+    unifi_user_groups: list[dict[str, Any]] | None = None,
+) -> str:
+    policy_names_by_id = _names_by_id(unifi_access_policies or [])
+    group_names_by_id = _names_by_id(unifi_user_groups or [])
+    output = StringIO()
+    writer = csv.DictWriter(output, fieldnames=BOOTSTRAP_COLUMNS, lineterminator="\n")
+    writer.writeheader()
+    snapshots = session.scalars(select(UnifiUser).order_by(UnifiUser.email, UnifiUser.unifi_user_id)).all()
+    for snapshot in snapshots:
+        writer.writerow(_unifi_user_export_row(session, snapshot, policy_names_by_id, group_names_by_id))
+    return output.getvalue()
 
 
-def _normalize_lookup(value: str | None) -> str:
-    return " ".join(_norm(value).casefold().split())
+def export_unmatched_unifi_users_csv(session: Session, **kwargs: Any) -> str:
+    return export_all_unifi_users_csv(session, **kwargs)
 
 
-def _is_truthy(value: str | None) -> bool:
-    return _norm_lower(value) in {"1", "true", "yes", "y", "promote"}
+def import_bootstrap_users_csv(
+    session: Session,
+    csv_text: str,
+    *,
+    unifi_access_policies: list[dict[str, Any]] | None = None,
+    unifi_user_groups: list[dict[str, Any]] | None = None,
+    actor_account_id: int | None = None,
+    actor_email: str | None = None,
+    ip_address: str | None = None,
+) -> BootstrapImportSummary:
+    summary = BootstrapImportSummary()
+    reader = csv.DictReader(StringIO(csv_text))
+    missing_columns = [column for column in BOOTSTRAP_COLUMNS if column not in (reader.fieldnames or [])]
+    if missing_columns:
+        summary.errors.append(f"Missing required columns: {', '.join(missing_columns)}")
+        return summary
+
+    policy_refs = unifi_access_policies or []
+    group_refs = unifi_user_groups or []
+
+    for row_number, row in enumerate(reader, start=2):
+        summary.rows_seen += 1
+        promote = _is_truthy(row.get("promote"))
+        update_existing = _is_truthy(row.get("update_existing"))
+        if not promote and not update_existing:
+            summary.rows_skipped += 1
+            continue
+
+        unifi_user_id = _norm(row.get("unifi_user_id"))
+        if not unifi_user_id:
+            summary.errors.append(f"Row {row_number}: unifi_user_id is required.")
+            continue
+        snapshot = session.scalar(select(UnifiUser).where(UnifiUser.unifi_user_id == unifi_user_id))
+        if snapshot is None:
+            summary.errors.append(f"Row {row_number}: UniFi snapshot {unifi_user_id} was not found.")
+            continue
+
+        linked_user = session.get(User, snapshot.local_user_id) if snapshot.local_user_id else None
+        if linked_user and not update_existing:
+            summary.rows_skipped += 1
+            continue
+        if not linked_user and update_existing and not promote:
+            summary.errors.append(f"Row {row_number}: UniFi user {unifi_user_id} is not linked; use promote=yes to create or link a local registry user.")
+            continue
+
+        row_errors: list[str] = []
+        company = _resolve_reference(
+            session,
+            row,
+            row_number=row_number,
+            model=Company,
+            label="company",
+            id_field="company_id",
+            name_field="company_name",
+            name_attribute="name",
+            required=promote or _has_any(row, "company_id", "company_name"),
+            errors=row_errors,
+        )
+        suite = _resolve_reference(
+            session,
+            row,
+            row_number=row_number,
+            model=Suite,
+            label="suite",
+            id_field="suite_id",
+            name_field="suite_number",
+            name_attribute="suite_number",
+            required=promote or _has_any(row, "suite_id", "suite_number"),
+            errors=row_errors,
+        )
+        desired_policy_ids, desired_policy_names = _resolve_unifi_selection(
+            row,
+            row_number=row_number,
+            label="UniFi Access Policy",
+            id_field="desired_unifi_access_policy_ids",
+            name_field="desired_unifi_access_policy_names",
+            references=policy_refs,
+            errors=row_errors,
+        )
+        desired_group_ids, desired_group_names = _resolve_unifi_selection(
+            row,
+            row_number=row_number,
+            label="UniFi User Group",
+            id_field="desired_unifi_user_group_ids",
+            name_field="desired_unifi_user_group_names",
+            references=group_refs,
+            errors=row_errors,
+        )
+        if row_errors:
+            summary.errors.extend(row_errors)
+            continue
+
+        user = linked_user
+        if user is None:
+            user = _find_existing_user(
+                session,
+                email=_norm_lower(row.get("email")),
+                employee_number=_norm(row.get("employee_number")) or snapshot.employee_number,
+            )
+        before = _local_before(user)
+        if user is None:
+            if not (_norm_lower(row.get("email")) or snapshot.email):
+                summary.errors.append(f"Row {row_number}: email is required to create a new local registry user.")
+                continue
+            user = _new_user_from_row(row, snapshot)
+            session.add(user)
+            summary.users_created += 1
+        elif user is not linked_user:
+            summary.users_updated += 1
+        elif update_existing:
+            summary.users_updated += 1
+
+        _apply_registry_fields(
+            user,
+            row,
+            snapshot=snapshot,
+            company=company,
+            suite=suite,
+            desired_policy_ids=desired_policy_ids,
+            desired_policy_names=desired_policy_names,
+            desired_group_ids=desired_group_ids,
+            desired_group_names=desired_group_names,
+            update_existing=update_existing,
+        )
+        session.flush()
+
+        if company and suite:
+            _ensure_primary_assignment(session, user=user, company_id=company.id, suite_id=suite.id)
+        if snapshot.local_user_id != user.id:
+            snapshot.local_user_id = user.id
+            summary.snapshots_linked += 1
+
+        session.add(
+            AuditLog(
+                actor_account_id=actor_account_id,
+                actor_email=actor_email,
+                action="bootstrap.update_local_registry_user" if update_existing and linked_user else "bootstrap.promote_unifi_user",
+                target_type="User",
+                target_id=str(user.id),
+                before_json=before,
+                after_json={
+                    "unifi_user_id": snapshot.unifi_user_id,
+                    "company_id": user.company_id,
+                    "suite_id": user.primary_suite_id,
+                    "desired_unifi_access_policy_ids": user.desired_unifi_access_policy_ids or [],
+                    "desired_unifi_user_group_ids": user.desired_unifi_user_group_ids or [],
+                },
+                ip_address=ip_address,
+            )
+        )
+    return summary
 
 
-def _local_status_from_unifi(status: str | None) -> str:
-    normalized = _norm_lower(status)
-    if normalized in ACTIVE_UNIFI_STATUSES:
-        return "active"
-    if normalized in INACTIVE_UNIFI_STATUSES:
-        return "inactive"
-    return "pending"
+def _unifi_user_export_row(
+    session: Session,
+    snapshot: UnifiUser,
+    policy_names_by_id: dict[str, str],
+    group_names_by_id: dict[str, str],
+) -> dict[str, Any]:
+    raw_snapshot = snapshot.raw_snapshot_json or {}
+    linked_user = session.get(User, snapshot.local_user_id) if snapshot.local_user_id else None
+    company = linked_user.company if linked_user else None
+    suite = linked_user.primary_suite if linked_user else None
+    policy_ids = [str(value) for value in (snapshot.access_policy_ids or _extract_item_ids(raw_snapshot, ("access_policy", "access_policies", "accessPolicy", "accessPolicies")))]
+    policy_names = _names_for_ids(policy_ids, policy_names_by_id) or _extract_item_names(
+        raw_snapshot, ("access_policy", "access_policies", "accessPolicy", "accessPolicies")
+    )
+    group_ids = _extract_item_ids(raw_snapshot, ("groups", "user_groups", "userGroups", "department", "departments"))
+    group_names = _names_for_ids(group_ids, group_names_by_id) or _extract_item_names(
+        raw_snapshot, ("groups", "user_groups", "userGroups", "department", "departments")
+    )
+    full_name = _norm(_first_present(raw_snapshot, ("full_name", "fullName", "name", "display_name", "displayName"))) or " ".join(
+        part for part in (snapshot.first_name, snapshot.last_name) if part
+    )
+    return {
+        "unifi_user_id": snapshot.unifi_user_id,
+        "linked_local_user_id": linked_user.id if linked_user else "",
+        "is_linked": "yes" if linked_user else "no",
+        "first_name": snapshot.first_name or "",
+        "last_name": snapshot.last_name or "",
+        "full_name": full_name,
+        "email": snapshot.email or "",
+        "employee_number": snapshot.employee_number or "",
+        "unifi_status": snapshot.status or "",
+        "onboard_time": _norm(_first_present(raw_snapshot, ("onboard_time", "onboardTime", "created_at", "createdAt"))),
+        "current_unifi_access_policy_ids": _join(policy_ids),
+        "current_unifi_access_policy_names": _join(policy_names),
+        "current_unifi_user_group_ids": _join(group_ids),
+        "current_unifi_user_group_names": _join(group_names),
+        "nfc_card_count": str(len(_extract_items(raw_snapshot, ("nfc_cards", "nfcCards", "cards", "access_cards", "accessCards")))),
+        "touch_pass_status": _touch_pass_value(raw_snapshot, ("status", "state")),
+        "touch_pass_last_activity": _touch_pass_value(raw_snapshot, ("last_activity", "lastActivity", "last_used_at", "lastUsedAt")),
+        "license_plate_count": str(len(_extract_items(raw_snapshot, ("license_plates", "licensePlates", "vehicles", "plates")))),
+        "raw_snapshot_reference": f"unifi_users:{snapshot.id}",
+        "promote": "",
+        "update_existing": "",
+        "company_id": linked_user.company_id if linked_user and linked_user.company_id else "",
+        "company_name": company.name if company else "",
+        "suite_id": linked_user.primary_suite_id if linked_user and linked_user.primary_suite_id else "",
+        "suite_number": suite.suite_number if suite else "",
+        "desired_unifi_access_policy_ids": _join(linked_user.desired_unifi_access_policy_ids or []) if linked_user else "",
+        "desired_unifi_access_policy_names": _join(linked_user.desired_unifi_access_policy_names or []) if linked_user else "",
+        "desired_unifi_user_group_ids": _join(linked_user.desired_unifi_user_group_ids or []) if linked_user else "",
+        "desired_unifi_user_group_names": _join(linked_user.desired_unifi_user_group_names or []) if linked_user else "",
+        "user_status": linked_user.status if linked_user else "",
+        "notes": linked_user.notes if linked_user and linked_user.notes else "",
+    }
+
+
+def _new_user_from_row(row: dict[str, str], snapshot: UnifiUser) -> User:
+    first_name = _norm(row.get("first_name")) or snapshot.first_name or "Unknown"
+    last_name = _norm(row.get("last_name")) or snapshot.last_name or "Unknown"
+    email = _norm_lower(row.get("email")) or snapshot.email
+    if not email:
+        raise ValueError("Bootstrap import requires an email for new local users.")
+    return User(
+        first_name=first_name,
+        last_name=last_name,
+        email=email,
+        employee_number=_norm(row.get("employee_number")) or snapshot.employee_number,
+        status=_norm(row.get("user_status")) or _local_status_from_unifi(snapshot.status),
+    )
+
+
+def _apply_registry_fields(
+    user: User,
+    row: dict[str, str],
+    *,
+    snapshot: UnifiUser,
+    company: Company | None,
+    suite: Suite | None,
+    desired_policy_ids: list[str],
+    desired_policy_names: list[str],
+    desired_group_ids: list[str],
+    desired_group_names: list[str],
+    update_existing: bool,
+) -> None:
+    user.first_name = _norm(row.get("first_name")) or user.first_name or snapshot.first_name or "Unknown"
+    user.last_name = _norm(row.get("last_name")) or user.last_name or snapshot.last_name or "Unknown"
+    user.email = _norm_lower(row.get("email")) or user.email or snapshot.email
+    user.employee_number = _norm(row.get("employee_number")) or user.employee_number or snapshot.employee_number
+    if company:
+        user.company_id = company.id
+    if suite:
+        user.primary_suite_id = suite.id
+    if desired_policy_ids or desired_policy_names or not update_existing:
+        user.desired_unifi_access_policy_ids = desired_policy_ids
+        user.desired_unifi_access_policy_names = desired_policy_names
+    if desired_group_ids or desired_group_names or not update_existing:
+        user.desired_unifi_user_group_ids = desired_group_ids
+        user.desired_unifi_user_group_names = desired_group_names
+    user.status = _norm(row.get("user_status")) or user.status or _local_status_from_unifi(snapshot.status)
+    user.notes = _norm(row.get("notes")) or user.notes
 
 
 def _resolve_reference(
@@ -90,13 +379,14 @@ def _resolve_reference(
     row: dict[str, str],
     *,
     row_number: int,
-    model: type[Company] | type[Suite] | type[AccessProfile],
+    model: type[Company] | type[Suite],
     label: str,
     id_field: str,
     name_field: str,
     name_attribute: str,
+    required: bool,
     errors: list[str],
-) -> Company | Suite | AccessProfile | None:
+) -> Company | Suite | None:
     raw_id = _norm(row.get(id_field))
     if raw_id:
         try:
@@ -111,7 +401,8 @@ def _resolve_reference(
 
     raw_name = _norm(row.get(name_field))
     if not raw_name:
-        errors.append(f"Row {row_number}: {label} reference is required; provide {id_field} or {name_field}.")
+        if required:
+            errors.append(f"Row {row_number}: {label} reference is required; provide {id_field} or {name_field}.")
         return None
 
     normalized_name = _normalize_lookup(raw_name)
@@ -129,12 +420,47 @@ def _resolve_reference(
     return matches[0]
 
 
+def _resolve_unifi_selection(
+    row: dict[str, str],
+    *,
+    row_number: int,
+    label: str,
+    id_field: str,
+    name_field: str,
+    references: list[dict[str, Any]],
+    errors: list[str],
+) -> tuple[list[str], list[str]]:
+    ids = _split_multi_value(row.get(id_field))
+    names = _split_multi_value(row.get(name_field))
+    names_by_id = _names_by_id(references)
+    if ids:
+        return ids, names or _names_for_ids(ids, names_by_id)
+    if not names:
+        return [], []
+
+    resolved_ids: list[str] = []
+    resolved_names: list[str] = []
+    for name in names:
+        matches = [item for item in references if _normalize_lookup(_item_name(item)) == _normalize_lookup(name)]
+        if not matches:
+            errors.append(f"Row {row_number}: {label} name {name!r} was not found.")
+            continue
+        if len(matches) > 1:
+            errors.append(f"Row {row_number}: {label} name {name!r} is ambiguous.")
+            continue
+        resolved_ids.append(_item_id(matches[0]))
+        resolved_names.append(_item_name(matches[0]))
+    return resolved_ids, resolved_names
+
+
 def _find_existing_user(session: Session, *, email: str, employee_number: str | None) -> User | None:
     if employee_number:
         user = session.scalar(select(User).where(User.employee_number == employee_number))
         if user:
             return user
-    return session.scalar(select(User).where(User.email == email))
+    if email:
+        return session.scalar(select(User).where(User.email == email))
+    return None
 
 
 def _ensure_primary_assignment(session: Session, *, user: User, company_id: int, suite_id: int) -> None:
@@ -158,219 +484,6 @@ def _ensure_primary_assignment(session: Session, *, user: User, company_id: int,
             active=True,
         )
     )
-
-
-def build_bootstrap_reference_zip(
-    session: Session,
-    *,
-    unifi_access_policies: list[dict[str, Any]] | None = None,
-    unifi_user_groups: list[dict[str, Any]] | None = None,
-) -> bytes:
-    policies = unifi_access_policies or []
-    groups = unifi_user_groups or []
-    policy_names_by_id = _names_by_id(policies)
-    group_names_by_id = _names_by_id(groups)
-    files = {
-        "companies.csv": _csv_text(COMPANY_FIELDS, _company_rows(session)),
-        "suites.csv": _csv_text(SUITE_FIELDS, _suite_rows(session)),
-        "access_profiles.csv": _csv_text(ACCESS_PROFILE_FIELDS, _access_profile_rows(session)),
-        "unifi_access_policies.csv": _csv_text(UNIFI_REFERENCE_FIELDS, _unifi_reference_rows(policies)),
-        "unifi_user_groups.csv": _csv_text(UNIFI_REFERENCE_FIELDS, _unifi_reference_rows(groups)),
-        "unmatched_unifi_users.csv": export_unmatched_unifi_users_csv(
-            session,
-            policy_names_by_id=policy_names_by_id,
-            group_names_by_id=group_names_by_id,
-        ),
-    }
-    archive = io.BytesIO()
-    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
-        for filename, content in files.items():
-            zip_file.writestr(filename, content)
-    return archive.getvalue()
-
-
-def export_unmatched_unifi_users_csv(
-    session: Session,
-    *,
-    policy_names_by_id: dict[str, str] | None = None,
-    group_names_by_id: dict[str, str] | None = None,
-) -> str:
-    policy_names_by_id = policy_names_by_id or {}
-    group_names_by_id = group_names_by_id or {}
-    output = StringIO()
-    writer = csv.DictWriter(output, fieldnames=BOOTSTRAP_COLUMNS, lineterminator="\n")
-    writer.writeheader()
-    snapshots = session.scalars(
-        select(UnifiUser).where(UnifiUser.local_user_id.is_(None)).order_by(UnifiUser.email, UnifiUser.unifi_user_id)
-    ).all()
-    for snapshot in snapshots:
-        raw_snapshot = snapshot.raw_snapshot_json or {}
-        policy_ids = [str(value) for value in (snapshot.access_policy_ids or _extract_item_ids(raw_snapshot, ("access_policy", "access_policies", "accessPolicy", "accessPolicies")))]
-        policy_names = _names_for_ids(policy_ids, policy_names_by_id) or _extract_item_names(
-            raw_snapshot, ("access_policy", "access_policies", "accessPolicy", "accessPolicies")
-        )
-        group_ids = _extract_item_ids(raw_snapshot, ("groups", "user_groups", "userGroups", "department", "departments"))
-        group_names = _names_for_ids(group_ids, group_names_by_id) or _extract_item_names(
-            raw_snapshot, ("groups", "user_groups", "userGroups", "department", "departments")
-        )
-        full_name = _norm(raw_snapshot.get("full_name") or raw_snapshot.get("fullName") or raw_snapshot.get("name")) or " ".join(
-            part for part in (snapshot.first_name, snapshot.last_name) if part
-        )
-        writer.writerow(
-            {
-                "unifi_user_id": snapshot.unifi_user_id,
-                "first_name": snapshot.first_name or "",
-                "last_name": snapshot.last_name or "",
-                "full_name": full_name,
-                "email": snapshot.email or "",
-                "employee_number": snapshot.employee_number or "",
-                "unifi_status": snapshot.status or "",
-                "current_unifi_access_policy_ids": _join(policy_ids),
-                "current_unifi_access_policy_names": _join(policy_names),
-                "current_unifi_user_group_ids": _join(group_ids),
-                "current_unifi_user_group_names": _join(group_names),
-                "promote": "",
-                "company_id": "",
-                "company_name": "",
-                "suite_id": "",
-                "suite_number": "",
-                "access_profile_id": "",
-                "access_profile_name": "",
-                "notes": "",
-            }
-        )
-    return output.getvalue()
-
-
-def import_bootstrap_users_csv(
-    session: Session,
-    csv_text: str,
-    *,
-    actor_account_id: int | None = None,
-    actor_email: str | None = None,
-    ip_address: str | None = None,
-) -> BootstrapImportSummary:
-    summary = BootstrapImportSummary()
-    reader = csv.DictReader(StringIO(csv_text))
-    missing_columns = [column for column in BOOTSTRAP_COLUMNS if column not in (reader.fieldnames or [])]
-    if missing_columns:
-        summary.errors.append(f"Missing required columns: {', '.join(missing_columns)}")
-        return summary
-
-    for row_number, row in enumerate(reader, start=2):
-        summary.rows_seen += 1
-        if not _is_truthy(row.get("promote")):
-            summary.rows_skipped += 1
-            continue
-
-        unifi_user_id = _norm(row.get("unifi_user_id"))
-        email = _norm_lower(row.get("email"))
-        employee_number = _norm(row.get("employee_number")) or None
-        first_name = _norm(row.get("first_name"))
-        last_name = _norm(row.get("last_name"))
-        if not unifi_user_id or not email or not first_name or not last_name:
-            summary.errors.append(f"Row {row_number}: unifi_user_id, email, first_name, and last_name are required.")
-            continue
-
-        snapshot = session.scalar(select(UnifiUser).where(UnifiUser.unifi_user_id == unifi_user_id))
-        if snapshot is None:
-            summary.errors.append(f"Row {row_number}: UniFi snapshot {unifi_user_id} was not found.")
-            continue
-        if snapshot.local_user_id is not None:
-            summary.rows_skipped += 1
-            continue
-
-        row_errors: list[str] = []
-        company = _resolve_reference(
-            session,
-            row,
-            row_number=row_number,
-            model=Company,
-            label="company",
-            id_field="company_id",
-            name_field="company_name",
-            name_attribute="name",
-            errors=row_errors,
-        )
-        suite = _resolve_reference(
-            session,
-            row,
-            row_number=row_number,
-            model=Suite,
-            label="suite",
-            id_field="suite_id",
-            name_field="suite_number",
-            name_attribute="suite_number",
-            errors=row_errors,
-        )
-        profile = _resolve_reference(
-            session,
-            row,
-            row_number=row_number,
-            model=AccessProfile,
-            label="access profile",
-            id_field="access_profile_id",
-            name_field="access_profile_name",
-            name_attribute="name",
-            errors=row_errors,
-        )
-        if company is None or suite is None or profile is None:
-            summary.errors.extend(row_errors)
-            continue
-
-        user = _find_existing_user(session, email=email, employee_number=employee_number)
-        before = None
-        if user is None:
-            user = User(
-                first_name=first_name,
-                last_name=last_name,
-                email=email,
-                employee_number=employee_number,
-                status=_norm(row.get("local_status")) or _local_status_from_unifi(snapshot.status),
-            )
-            session.add(user)
-            summary.users_created += 1
-        else:
-            before = {
-                "company_id": user.company_id,
-                "primary_suite_id": user.primary_suite_id,
-                "access_profile_id": user.access_profile_id,
-                "status": user.status,
-            }
-            summary.users_updated += 1
-
-        user.first_name = first_name
-        user.last_name = last_name
-        user.email = email
-        user.employee_number = employee_number
-        user.company_id = company.id
-        user.primary_suite_id = suite.id
-        user.access_profile_id = profile.id
-        user.notes = _norm(row.get("notes")) or user.notes
-        user.status = _norm(row.get("local_status")) or _local_status_from_unifi(snapshot.status)
-        session.flush()
-
-        _ensure_primary_assignment(session, user=user, company_id=company.id, suite_id=suite.id)
-        snapshot.local_user_id = user.id
-        summary.snapshots_linked += 1
-        session.add(
-            AuditLog(
-                actor_account_id=actor_account_id,
-                actor_email=actor_email,
-                action="bootstrap.promote_unifi_user",
-                target_type="User",
-                target_id=str(user.id),
-                before_json=before,
-                after_json={
-                    "unifi_user_id": snapshot.unifi_user_id,
-                    "company_id": company.id,
-                    "suite_id": suite.id,
-                    "access_profile_id": profile.id,
-                },
-                ip_address=ip_address,
-            )
-        )
-    return summary
 
 
 def _company_rows(session: Session) -> list[dict[str, Any]]:
@@ -403,22 +516,16 @@ def _suite_rows(session: Session) -> list[dict[str, Any]]:
     ]
 
 
-def _access_profile_rows(session: Session) -> list[dict[str, Any]]:
+def _unifi_reference_rows(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {
-            "id": profile.id,
-            "name": profile.name,
-            "description": profile.description,
-            "active": profile.active,
-            "unifi_access_policy_ids": _join(profile.unifi_access_policy_ids),
-            "unifi_user_group_ids": _join(profile.unifi_user_group_ids),
+            "id": _item_id(item),
+            "name": _item_name(item),
+            "description": _norm(_first_present(item, ("description", "desc"))),
+            "status": _norm(_first_present(item, ("status", "state"))),
         }
-        for profile in session.scalars(select(AccessProfile).order_by(AccessProfile.name)).all()
+        for item in items
     ]
-
-
-def _unifi_reference_rows(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [{"id": _item_id(item), "name": _item_name(item)} for item in items]
 
 
 def _csv_text(fieldnames: list[str], rows: list[dict[str, Any]]) -> str:
@@ -429,24 +536,33 @@ def _csv_text(fieldnames: list[str], rows: list[dict[str, Any]]) -> str:
     return output.getvalue()
 
 
-def _names_by_id(items: list[dict[str, Any]]) -> dict[str, str]:
-    return {str(_item_id(item)): _item_name(item) for item in items if _item_id(item)}
+def _local_before(user: User | None) -> dict[str, Any] | None:
+    if user is None:
+        return None
+    return {
+        "company_id": user.company_id,
+        "primary_suite_id": user.primary_suite_id,
+        "desired_unifi_access_policy_ids": user.desired_unifi_access_policy_ids or [],
+        "desired_unifi_user_group_ids": user.desired_unifi_user_group_ids or [],
+        "status": user.status,
+    }
 
 
-def _item_id(item: dict[str, Any]) -> str:
-    return _norm(item.get("id") or item.get("policy_id") or item.get("policyId") or item.get("group_id") or item.get("groupId") or item.get("uuid"))
+def _first_present(source: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    if not isinstance(source, dict):
+        return None
+    for key in keys:
+        value = source.get(key)
+        if value not in (None, ""):
+            return value
+    return None
 
 
-def _item_name(item: dict[str, Any]) -> str:
-    return _norm(
-        item.get("name")
-        or item.get("display_name")
-        or item.get("displayName")
-        or item.get("policy_name")
-        or item.get("policyName")
-        or item.get("group_name")
-        or item.get("groupName")
-    )
+def _touch_pass_value(snapshot: dict[str, Any], keys: tuple[str, ...]) -> str:
+    touch_pass = _first_present(snapshot, ("touch_pass", "touchPass", "mobile_credential", "mobileCredential"))
+    if not isinstance(touch_pass, dict):
+        return ""
+    return _norm(_first_present(touch_pass, keys))
 
 
 def _extract_item_ids(snapshot: dict[str, Any], keys: tuple[str, ...]) -> list[str]:
@@ -469,9 +585,62 @@ def _extract_items(snapshot: dict[str, Any], keys: tuple[str, ...]) -> list[dict
     return []
 
 
+def _names_by_id(items: list[dict[str, Any]]) -> dict[str, str]:
+    return {str(_item_id(item)): _item_name(item) for item in items if _item_id(item)}
+
+
+def _item_id(item: dict[str, Any]) -> str:
+    return _norm(item.get("id") or item.get("policy_id") or item.get("policyId") or item.get("group_id") or item.get("groupId") or item.get("uuid"))
+
+
+def _item_name(item: dict[str, Any]) -> str:
+    return _norm(
+        item.get("name")
+        or item.get("display_name")
+        or item.get("displayName")
+        or item.get("policy_name")
+        or item.get("policyName")
+        or item.get("group_name")
+        or item.get("groupName")
+    )
+
+
 def _names_for_ids(ids: list[str], names_by_id: dict[str, str]) -> list[str]:
     return [names_by_id[item_id] for item_id in ids if names_by_id.get(item_id)]
 
 
+def _split_multi_value(value: str | None) -> list[str]:
+    return [part.strip() for part in re.split(r"[;,\n]", value or "") if part.strip()]
+
+
 def _join(values: list[Any]) -> str:
     return ";".join(str(value) for value in values if value not in (None, ""))
+
+
+def _has_any(row: dict[str, str], *keys: str) -> bool:
+    return any(_norm(row.get(key)) for key in keys)
+
+
+def _norm(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _norm_lower(value: Any) -> str:
+    return _normalize_lookup(value)
+
+
+def _normalize_lookup(value: Any) -> str:
+    return " ".join(_norm(value).casefold().split())
+
+
+def _is_truthy(value: Any) -> bool:
+    return _norm_lower(value) in {"1", "true", "yes", "y", "on", "promote", "update"}
+
+
+def _local_status_from_unifi(status: str | None) -> str:
+    normalized = _norm_lower(status)
+    if normalized in ACTIVE_UNIFI_STATUSES:
+        return "active"
+    if normalized in INACTIVE_UNIFI_STATUSES:
+        return "inactive"
+    return "pending"

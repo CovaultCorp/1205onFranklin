@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.mailer import send_email
-from app.models import Company, ReportRun, Suite, User, utcnow
+from app.models import Company, ReportRun, Suite, UnifiUser, User, utcnow
 from app.verification import create_verification_request
 
 REPORT_COLUMNS = [
@@ -22,6 +22,10 @@ REPORT_COLUMNS = [
     "Status",
     "Access profile",
     "UniFi status",
+    "Current UniFi Access Policies",
+    "Desired UniFi Access Policies",
+    "Current UniFi User Groups",
+    "Desired UniFi User Groups",
     "Last verified date",
     "Notes",
 ]
@@ -34,8 +38,10 @@ def _report_dir() -> Path:
 
 
 def _user_rows(session: Session, *, company_id: int | None = None, suite_id: int | None = None) -> list[dict[str, Any]]:
-    statement = select(User, Company, Suite).join(Company, User.company_id == Company.id, isouter=True).join(
+    statement = select(User, Company, Suite, UnifiUser).join(Company, User.company_id == Company.id, isouter=True).join(
         Suite, User.primary_suite_id == Suite.id, isouter=True
+    ).join(
+        UnifiUser, UnifiUser.local_user_id == User.id, isouter=True
     )
     statement = statement.where(User.status == "active")
     if company_id:
@@ -44,7 +50,7 @@ def _user_rows(session: Session, *, company_id: int | None = None, suite_id: int
         statement = statement.where(User.primary_suite_id == suite_id)
     statement = statement.order_by(Suite.suite_number, Company.name, User.last_name, User.first_name)
     rows = []
-    for user, company, suite in session.execute(statement):
+    for user, company, suite, unifi_user in session.execute(statement):
         rows.append(
             {
                 "Full name": f"{user.first_name} {user.last_name}",
@@ -54,12 +60,70 @@ def _user_rows(session: Session, *, company_id: int | None = None, suite_id: int
                 "Suite": suite.suite_number if suite else "",
                 "Status": user.status,
                 "Access profile": user.access_profile.name if user.access_profile else "",
-                "UniFi status": "",
+                "UniFi status": unifi_user.status if unifi_user else "",
+                "Current UniFi Access Policies": _current_policy_names(unifi_user),
+                "Desired UniFi Access Policies": _join_values(
+                    user.desired_unifi_access_policy_names or user.desired_unifi_access_policy_ids or []
+                ),
+                "Current UniFi User Groups": _current_group_names(unifi_user),
+                "Desired UniFi User Groups": _join_values(user.desired_unifi_user_group_names or user.desired_unifi_user_group_ids or []),
                 "Last verified date": user.last_verified_at.date().isoformat() if user.last_verified_at else "",
                 "Notes": user.notes or "",
             }
         )
     return rows
+
+
+def _current_policy_names(unifi_user: UnifiUser | None) -> str:
+    if unifi_user is None:
+        return ""
+    names = _extract_item_names(
+        unifi_user.raw_snapshot_json or {},
+        ("access_policy", "access_policies", "accessPolicy", "accessPolicies"),
+    )
+    return _join_values(names or unifi_user.access_policy_ids or [])
+
+
+def _current_group_names(unifi_user: UnifiUser | None) -> str:
+    if unifi_user is None:
+        return ""
+    names = _extract_item_names(
+        unifi_user.raw_snapshot_json or {},
+        ("groups", "user_groups", "userGroups", "department", "departments"),
+    )
+    return _join_values(names)
+
+
+def _extract_item_names(snapshot: dict[str, Any], keys: tuple[str, ...]) -> list[str]:
+    for key in keys:
+        value = snapshot.get(key)
+        if isinstance(value, list):
+            return [_item_name(item) for item in value if _item_name(item)]
+        if isinstance(value, dict):
+            name = _item_name(value)
+            return [name] if name else []
+        if value not in (None, ""):
+            return [str(value)]
+    return []
+
+
+def _item_name(item: Any) -> str:
+    if not isinstance(item, dict):
+        return str(item)
+    return str(
+        item.get("name")
+        or item.get("display_name")
+        or item.get("displayName")
+        or item.get("policy_name")
+        or item.get("policyName")
+        or item.get("group_name")
+        or item.get("groupName")
+        or ""
+    ).strip()
+
+
+def _join_values(values: list[Any]) -> str:
+    return "; ".join(str(value) for value in values if value not in (None, ""))
 
 
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:

@@ -35,50 +35,78 @@ def _csv_text(rows: list[dict[str, str]]) -> str:
     return output.getvalue()
 
 
-def test_reference_export_zip_contains_expected_files(db_context):
+def test_reference_export_zip_contains_expected_files_and_all_unifi_users(db_context):
     from app.import_export import build_bootstrap_reference_zip
-    from app.models import UnifiUser
+    from app.models import Company, Suite, UnifiUser, User
 
     with db_context() as session:
+        company = Company(name="Acme")
+        suite = Suite(suite_number="1200")
+        session.add_all([company, suite])
+        session.flush()
+        linked = User(
+            first_name="Linked",
+            last_name="User",
+            email="linked@example.com",
+            company_id=company.id,
+            primary_suite_id=suite.id,
+            desired_unifi_access_policy_ids=["policy-2"],
+            desired_unifi_access_policy_names=["Suite 1200"],
+            desired_unifi_user_group_ids=["group-2"],
+            desired_unifi_user_group_names=["Managers"],
+            status="active",
+        )
+        session.add(linked)
+        session.flush()
         session.add_all(
             [
                 UnifiUser(
-                    unifi_user_id="unmatched",
+                    unifi_user_id="unlinked",
                     email="u@example.com",
                     first_name="Un",
-                    last_name="Matched",
+                    last_name="Linked",
                     status="active",
                     access_policy_ids=["policy-1"],
                     raw_snapshot_json={"groups": [{"id": "group-1", "name": "Employees"}]},
                 ),
-                UnifiUser(unifi_user_id="matched", local_user_id=99, email="m@example.com", status="active"),
+                UnifiUser(
+                    unifi_user_id="linked",
+                    local_user_id=linked.id,
+                    email="linked@example.com",
+                    status="active",
+                    access_policy_ids=["policy-2"],
+                    raw_snapshot_json={"groups": [{"id": "group-2", "name": "Managers"}]},
+                ),
             ]
         )
         session.commit()
         archive_bytes = build_bootstrap_reference_zip(
             session,
-            unifi_access_policies=[{"id": "policy-1", "name": "Front Door"}],
-            unifi_user_groups=[{"id": "group-1", "name": "Employees"}],
+            unifi_access_policies=[{"id": "policy-1", "name": "Front Door"}, {"id": "policy-2", "name": "Suite 1200"}],
+            unifi_user_groups=[{"id": "group-1", "name": "Employees"}, {"id": "group-2", "name": "Managers"}],
         )
 
     with zipfile.ZipFile(BytesIO(archive_bytes)) as archive:
         assert set(archive.namelist()) == {
+            "all_unifi_users.csv",
             "companies.csv",
             "suites.csv",
-            "access_profiles.csv",
             "unifi_access_policies.csv",
             "unifi_user_groups.csv",
-            "unmatched_unifi_users.csv",
         }
-        rows = list(csv.DictReader(StringIO(archive.read("unmatched_unifi_users.csv").decode("utf-8"))))
+        rows = list(csv.DictReader(StringIO(archive.read("all_unifi_users.csv").decode("utf-8"))))
 
-    assert len(rows) == 1
-    assert rows[0]["unifi_user_id"] == "unmatched"
-    assert rows[0]["current_unifi_access_policy_ids"] == "policy-1"
-    assert rows[0]["current_unifi_access_policy_names"] == "Front Door"
-    assert rows[0]["current_unifi_user_group_ids"] == "group-1"
-    assert rows[0]["current_unifi_user_group_names"] == "Employees"
-    assert "access_profile_id" in rows[0]
+    assert {row["unifi_user_id"] for row in rows} == {"unlinked", "linked"}
+    linked_row = next(row for row in rows if row["unifi_user_id"] == "linked")
+    unlinked_row = next(row for row in rows if row["unifi_user_id"] == "unlinked")
+    assert linked_row["is_linked"] == "yes"
+    assert linked_row["company_name"] == "Acme"
+    assert linked_row["suite_number"] == "1200"
+    assert linked_row["desired_unifi_access_policy_names"] == "Suite 1200"
+    assert unlinked_row["current_unifi_access_policy_ids"] == "policy-1"
+    assert unlinked_row["current_unifi_access_policy_names"] == "Front Door"
+    assert unlinked_row["current_unifi_user_group_ids"] == "group-1"
+    assert unlinked_row["current_unifi_user_group_names"] == "Employees"
 
 
 def test_policy_and_group_csv_generation(db_context):
@@ -87,23 +115,22 @@ def test_policy_and_group_csv_generation(db_context):
     with db_context() as session:
         archive_bytes = build_bootstrap_reference_zip(
             session,
-            unifi_access_policies=[{"id": "policy-1", "name": "Front Door"}],
-            unifi_user_groups=[{"id": "group-1", "name": "Employees"}],
+            unifi_access_policies=[{"id": "policy-1", "name": "Front Door", "description": "Main", "status": "active"}],
+            unifi_user_groups=[{"id": "group-1", "name": "Employees", "description": "Staff", "status": "active"}],
         )
 
     with zipfile.ZipFile(BytesIO(archive_bytes)) as archive:
-        assert "policy-1,Front Door" in archive.read("unifi_access_policies.csv").decode("utf-8")
-        assert "group-1,Employees" in archive.read("unifi_user_groups.csv").decode("utf-8")
+        assert "policy-1,Front Door,Main,active" in archive.read("unifi_access_policies.csv").decode("utf-8")
+        assert "group-1,Employees,Staff,active" in archive.read("unifi_user_groups.csv").decode("utf-8")
 
 
-def test_import_promotes_unmatched_snapshot_with_assignments_and_audit(db_context):
+def test_import_promotes_unlinked_snapshot_by_id_with_assignments_and_audit(db_context):
     from app.import_export import import_bootstrap_users_csv
-    from app.models import AccessProfile, AuditLog, Company, Suite, UnifiUser, User, UserSuiteAssignment
+    from app.models import AuditLog, Company, Suite, UnifiUser, User, UserSuiteAssignment
 
     with db_context() as session:
         company = Company(name="Acme")
         suite = Suite(suite_number="1200")
-        profile = AccessProfile(name="Office Access", unifi_access_policy_ids=["policy-1"])
         snapshot = UnifiUser(
             unifi_user_id="u-1",
             email="ada@example.com",
@@ -112,7 +139,7 @@ def test_import_promotes_unmatched_snapshot_with_assignments_and_audit(db_contex
             last_name="Lovelace",
             status="active",
         )
-        session.add_all([company, suite, profile, snapshot])
+        session.add_all([company, suite, snapshot])
         session.commit()
 
         summary = import_bootstrap_users_csv(
@@ -126,17 +153,16 @@ def test_import_promotes_unmatched_snapshot_with_assignments_and_audit(db_contex
                         "employee_number": "E100",
                         "first_name": "Ada",
                         "last_name": "Lovelace",
-                        "unifi_status": "active",
                         "company_id": str(company.id),
-                        "company_name": "",
                         "suite_id": str(suite.id),
-                        "suite_number": "",
-                        "access_profile_id": str(profile.id),
-                        "access_profile_name": "",
+                        "desired_unifi_access_policy_ids": "policy-1",
+                        "desired_unifi_user_group_ids": "group-1",
                         "notes": "Imported from UniFi bootstrap",
                     }
                 ]
             ),
+            unifi_access_policies=[{"id": "policy-1", "name": "Front Door"}],
+            unifi_user_groups=[{"id": "group-1", "name": "Employees"}],
             actor_account_id=7,
             actor_email="admin@example.com",
         )
@@ -152,7 +178,11 @@ def test_import_promotes_unmatched_snapshot_with_assignments_and_audit(db_contex
         assert summary.errors == []
         assert user.company_id == company.id
         assert user.primary_suite_id == suite.id
-        assert user.access_profile_id == profile.id
+        assert user.access_profile_id is None
+        assert user.desired_unifi_access_policy_ids == ["policy-1"]
+        assert user.desired_unifi_access_policy_names == ["Front Door"]
+        assert user.desired_unifi_user_group_ids == ["group-1"]
+        assert user.desired_unifi_user_group_names == ["Employees"]
         assert user.status == "active"
         assert snapshot.local_user_id == user.id
         assert assignment.suite_id == suite.id
@@ -161,12 +191,11 @@ def test_import_promotes_unmatched_snapshot_with_assignments_and_audit(db_contex
 
 def test_import_promotes_by_name_lookup(db_context):
     from app.import_export import import_bootstrap_users_csv
-    from app.models import AccessProfile, Company, Suite, UnifiUser, User
+    from app.models import Company, Suite, UnifiUser, User
 
     with db_context() as session:
         company = Company(name="Acme")
         suite = Suite(suite_number="1200")
-        profile = AccessProfile(name="Office Access")
         snapshot = UnifiUser(
             unifi_user_id="u-1",
             email="ada@example.com",
@@ -175,7 +204,7 @@ def test_import_promotes_by_name_lookup(db_context):
             last_name="Lovelace",
             status="active",
         )
-        session.add_all([company, suite, profile, snapshot])
+        session.add_all([company, suite, snapshot])
         session.commit()
 
         summary = import_bootstrap_users_csv(
@@ -189,14 +218,15 @@ def test_import_promotes_by_name_lookup(db_context):
                         "employee_number": "E100",
                         "first_name": "Ada",
                         "last_name": "Lovelace",
-                        "unifi_status": "active",
                         "company_name": " acme ",
                         "suite_number": "1200",
-                        "access_profile_name": "office access",
-                        "notes": "",
+                        "desired_unifi_access_policy_names": "front door",
+                        "desired_unifi_user_group_names": "employees",
                     }
                 ]
             ),
+            unifi_access_policies=[{"id": "policy-1", "name": "Front Door"}],
+            unifi_user_groups=[{"id": "group-1", "name": "Employees"}],
         )
         session.commit()
 
@@ -206,20 +236,73 @@ def test_import_promotes_by_name_lookup(db_context):
         assert summary.errors == []
         assert user.company_id == company.id
         assert user.primary_suite_id == suite.id
-        assert user.access_profile_id == profile.id
+        assert user.desired_unifi_access_policy_ids == ["policy-1"]
+        assert user.desired_unifi_user_group_ids == ["group-1"]
 
 
-def test_import_links_existing_user_without_duplicate_and_skips_linked_rows(db_context):
+def test_import_updates_linked_user_when_update_existing_is_yes(db_context):
     from app.import_export import import_bootstrap_users_csv
-    from app.models import AccessProfile, Company, Suite, UnifiUser, User
+    from app.models import Company, Suite, UnifiUser, User
+
+    with db_context() as session:
+        company = Company(name="Acme")
+        old_suite = Suite(suite_number="1100")
+        new_suite = Suite(suite_number="1200")
+        session.add_all([company, old_suite, new_suite])
+        session.flush()
+        existing = User(
+            first_name="Ada",
+            last_name="Old",
+            email="ada@example.com",
+            employee_number="E100",
+            company_id=company.id,
+            primary_suite_id=old_suite.id,
+            desired_unifi_access_policy_ids=["old-policy"],
+            desired_unifi_access_policy_names=["Old Policy"],
+        )
+        session.add(existing)
+        session.flush()
+        session.add(UnifiUser(unifi_user_id="u-1", local_user_id=existing.id, email="ada@example.com", employee_number="E100"))
+        session.commit()
+
+        summary = import_bootstrap_users_csv(
+            session,
+            _csv_text(
+                [
+                    {
+                        "update_existing": "yes",
+                        "unifi_user_id": "u-1",
+                        "email": "ada@example.com",
+                        "first_name": "Ada",
+                        "last_name": "Lovelace",
+                        "company_name": "Acme",
+                        "suite_number": "1200",
+                        "desired_unifi_access_policy_names": "Front Door",
+                    }
+                ]
+            ),
+            unifi_access_policies=[{"id": "policy-1", "name": "Front Door"}],
+        )
+        session.commit()
+
+        user = session.get(User, existing.id)
+        assert summary.users_updated == 1
+        assert summary.errors == []
+        assert user.last_name == "Lovelace"
+        assert user.primary_suite_id == new_suite.id
+        assert user.desired_unifi_access_policy_ids == ["policy-1"]
+
+
+def test_import_links_existing_user_without_duplicate_and_skips_unmarked_rows(db_context):
+    from app.import_export import import_bootstrap_users_csv
+    from app.models import Company, Suite, UnifiUser, User
 
     with db_context() as session:
         company = Company(name="Acme")
         suite = Suite(suite_number="1200")
-        profile = AccessProfile(name="Office Access")
         existing = User(first_name="Ada", last_name="Existing", email="ada@example.com", employee_number="E100")
         snapshot = UnifiUser(unifi_user_id="u-1", email="ada@example.com", employee_number="E100", first_name="Ada", last_name="Lovelace")
-        session.add_all([company, suite, profile, existing, snapshot])
+        session.add_all([company, suite, existing, snapshot])
         session.commit()
 
         row = {
@@ -229,16 +312,10 @@ def test_import_links_existing_user_without_duplicate_and_skips_linked_rows(db_c
             "employee_number": "E100",
             "first_name": "Ada",
             "last_name": "Lovelace",
-            "unifi_status": "active",
             "company_id": str(company.id),
-            "company_name": "",
             "suite_id": str(suite.id),
-            "suite_number": "",
-            "access_profile_id": str(profile.id),
-            "access_profile_name": "",
-            "notes": "",
         }
-        first_summary = import_bootstrap_users_csv(session, _csv_text([row]))
+        first_summary = import_bootstrap_users_csv(session, _csv_text([row, {"unifi_user_id": "u-1"}]))
         session.commit()
         second_summary = import_bootstrap_users_csv(session, _csv_text([row]))
         session.commit()
@@ -249,18 +326,18 @@ def test_import_links_existing_user_without_duplicate_and_skips_linked_rows(db_c
         assert len(users) == 1
         assert first_summary.users_created == 0
         assert first_summary.users_updated == 1
+        assert first_summary.rows_skipped == 1
         assert first_summary.snapshots_linked == 1
         assert second_summary.rows_skipped == 1
         assert snapshot.local_user_id == existing.id
 
 
-def test_import_reports_missing_reference_errors(db_context):
+def test_import_reports_missing_reference_errors_without_importing_row(db_context):
     from app.import_export import import_bootstrap_users_csv
-    from app.models import AccessProfile, Company, UnifiUser
+    from app.models import Company, UnifiUser, User
 
     with db_context() as session:
-        session.add_all([Company(name="Acme"), AccessProfile(name="Office Access")])
-        session.add(UnifiUser(unifi_user_id="u-1", email="ada@example.com", first_name="Ada", last_name="Lovelace"))
+        session.add_all([Company(name="Acme"), UnifiUser(unifi_user_id="u-1", email="ada@example.com")])
         session.commit()
         summary = import_bootstrap_users_csv(
             session,
@@ -270,37 +347,31 @@ def test_import_reports_missing_reference_errors(db_context):
                         "promote": "yes",
                         "unifi_user_id": "u-1",
                         "email": "ada@example.com",
-                        "employee_number": "",
-                        "first_name": "Ada",
-                        "last_name": "Lovelace",
-                        "unifi_status": "active",
-                        "company_id": "",
                         "company_name": "Acme",
-                        "suite_id": "",
                         "suite_number": "404",
-                        "access_profile_id": "",
-                        "access_profile_name": "Office Access",
-                        "notes": "",
+                        "desired_unifi_access_policy_names": "Missing Policy",
                     }
                 ]
             ),
+            unifi_access_policies=[{"id": "policy-1", "name": "Front Door"}],
         )
 
-    assert summary.users_created == 0
-    assert any("suite name '404' was not found" in error for error in summary.errors)
+        assert summary.users_created == 0
+        assert any("suite name '404' was not found" in error for error in summary.errors)
+        assert any("UniFi Access Policy name 'Missing Policy' was not found" in error for error in summary.errors)
+        assert session.scalar(select(User).where(User.email == "ada@example.com")) is None
 
 
-def test_import_reports_ambiguous_name_errors(db_context):
+def test_import_reports_ambiguous_name_errors_without_importing_row(db_context):
     from app.import_export import import_bootstrap_users_csv
-    from app.models import AccessProfile, Company, Suite, UnifiUser, User
+    from app.models import Company, Suite, UnifiUser, User
 
     with db_context() as session:
         session.add_all(
             [
                 Company(name="Acme"),
-                Company(name="acme"),
+                Company(name=" acme "),
                 Suite(suite_number="1200"),
-                AccessProfile(name="Office Access"),
                 UnifiUser(unifi_user_id="u-1", email="ada@example.com", first_name="Ada", last_name="Lovelace", status="active"),
             ]
         )
@@ -313,19 +384,36 @@ def test_import_reports_ambiguous_name_errors(db_context):
                         "promote": "yes",
                         "unifi_user_id": "u-1",
                         "email": "ada@example.com",
-                        "employee_number": "",
-                        "first_name": "Ada",
-                        "last_name": "Lovelace",
-                        "unifi_status": "active",
                         "company_name": "ACME",
                         "suite_number": "1200",
-                        "access_profile_name": "Office Access",
-                        "notes": "",
+                        "desired_unifi_access_policy_names": "front door",
                     }
                 ]
             ),
+            unifi_access_policies=[{"id": "policy-1", "name": "Front Door"}, {"id": "policy-2", "name": " front door "}],
         )
 
         assert summary.users_created == 0
         assert any("company name 'ACME' is ambiguous" in error for error in summary.errors)
+        assert any("UniFi Access Policy name 'front door' is ambiguous" in error for error in summary.errors)
         assert session.scalar(select(User).where(User.email == "ada@example.com")) is None
+
+
+def test_import_reports_missing_email_as_row_error(db_context):
+    from app.import_export import import_bootstrap_users_csv
+    from app.models import Company, Suite, UnifiUser, User
+
+    with db_context() as session:
+        company = Company(name="Acme")
+        suite = Suite(suite_number="1200")
+        session.add_all([company, suite, UnifiUser(unifi_user_id="u-1", first_name="Ada", last_name="Lovelace")])
+        session.commit()
+
+        summary = import_bootstrap_users_csv(
+            session,
+            _csv_text([{"promote": "yes", "unifi_user_id": "u-1", "company_id": str(company.id), "suite_id": str(suite.id)}]),
+        )
+
+        assert summary.users_created == 0
+        assert summary.errors == ["Row 2: email is required to create a new local registry user."]
+        assert session.scalar(select(User)) is None
