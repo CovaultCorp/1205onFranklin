@@ -11,9 +11,11 @@ from src.unifi_access_exporter import (
     Config,
     ConfigError,
     UniFiAccessClient,
+    export_users,
     load_config,
     normalize_user,
     write_csv,
+    write_lite_csv,
 )
 
 
@@ -58,8 +60,13 @@ class ExporterTests(unittest.TestCase):
             "id": "u-1",
             "firstName": "Ada",
             "lastName": "Lovelace",
-            "email": "ada@example.com",
+            "userEmail": "ada@example.com",
+            "emailStatus": "verified",
             "employeeNumber": "E100",
+            "suite": "1200",
+            "phoneNumber": "555-0100",
+            "userName": "alovelace",
+            "nickname": "Ada",
             "status": "active",
             "onboardTime": "2026-01-02T03:04:05Z",
             "access_policy": [{"id": "p-1", "name": "Main Door"}],
@@ -73,7 +80,13 @@ class ExporterTests(unittest.TestCase):
 
         self.assertEqual(row["id"], "u-1")
         self.assertEqual(row["full_name"], "Ada Lovelace")
+        self.assertEqual(row["email"], "ada@example.com")
+        self.assertEqual(row["email_status"], "verified")
         self.assertEqual(row["employee_number"], "E100")
+        self.assertEqual(row["suite_number"], "1200")
+        self.assertEqual(row["phone"], "555-0100")
+        self.assertEqual(row["username"], "alovelace")
+        self.assertEqual(row["alias"], "Ada")
         self.assertEqual(row["access_policy_ids"], "p-1")
         self.assertEqual(row["access_policy_names"], "Main Door")
         self.assertEqual(row["group_names"], "Engineering")
@@ -131,6 +144,53 @@ class ExporterTests(unittest.TestCase):
 
         self.assertEqual(rows[0]["email"], "ada@example.com")
         self.assertEqual(rows[0]["access_policy_names"], "Main Door")
+
+    def test_lite_csv_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "Unifi_Acess_Users_Lite_test.csv"
+            write_lite_csv(
+                path,
+                [
+                    {
+                        "first_name": "Ada",
+                        "last_name": "Lovelace",
+                        "full_name": "Ada Lovelace",
+                        "email": "ada@example.com",
+                        "employee_number": "E100",
+                        "suite_number": "1200",
+                        "status": "active",
+                        "access_policy_names": "Main Door",
+                    }
+                ],
+            )
+
+            with path.open(newline="", encoding="utf-8") as csv_file:
+                rows = list(csv.DictReader(csv_file))
+
+        self.assertEqual(
+            list(rows[0].keys()),
+            ["first_name", "last_name", "full_name", "email", "employee_number", "suite_number", "status", "access_policy_names"],
+        )
+
+    def test_export_users_writes_lite_csv_alongside_full_export(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = test_config()
+            config = Config(
+                base_url=config.base_url,
+                token=config.token,
+                verify_ssl=config.verify_ssl,
+                page_size=config.page_size,
+                output_dir=Path(temp_dir),
+                export_csv=True,
+                export_json=True,
+                log_level=config.log_level,
+                sync_mode=config.sync_mode,
+                source_of_truth=config.source_of_truth,
+                enable_writes=config.enable_writes,
+            )
+            export_users(config, [{"id": "u-1", "firstName": "Ada", "lastName": "Lovelace"}])
+
+            assert list(Path(temp_dir).glob("Unifi_Acess_Users_Lite_*.csv"))
 
     def test_missing_token_validation(self) -> None:
         env = {

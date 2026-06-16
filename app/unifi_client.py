@@ -41,10 +41,14 @@ class UniFiAccessClient:
             return [item for item in payload if isinstance(item, dict)]
         if not isinstance(payload, dict):
             return []
-        for key in ("data", "items", "results"):
+        for key in ("data", "users", "items", "results", "result"):
             value = payload.get(key)
             if isinstance(value, list):
                 return [item for item in value if isinstance(item, dict)]
+            if isinstance(value, dict):
+                nested = UniFiAccessClient._items_from_payload(value)
+                if nested:
+                    return nested
         return []
 
     async def _list_paginated(self, path: str, *, params: list[tuple[str, Any]] | None = None) -> list[dict[str, Any]]:

@@ -10,6 +10,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+from app.unifi_normalization import (
+    as_text as str_or_empty,
+    first_present,
+    ids as extract_ids,
+    list_values as list_objects,
+    names as extract_names,
+    normalize_unifi_user,
+    sanitize_for_snapshot as sanitize_for_export,
+)
+
 try:
     import requests
 except ImportError:  # pragma: no cover - dependency is installed in Docker/runtime
@@ -46,7 +56,12 @@ CSV_FIELDS = [
     "last_name",
     "full_name",
     "email",
+    "email_status",
     "employee_number",
+    "suite_number",
+    "phone",
+    "username",
+    "alias",
     "status",
     "onboard_time",
     "access_policy_ids",
@@ -58,6 +73,16 @@ CSV_FIELDS = [
     "touch_pass_last_activity",
     "license_plate_count",
     "raw_user_json_file",
+]
+LITE_CSV_FIELDS = [
+    "first_name",
+    "last_name",
+    "full_name",
+    "email",
+    "employee_number",
+    "suite_number",
+    "status",
+    "access_policy_names",
 ]
 
 SENSITIVE_KEY_PARTS = (
@@ -308,110 +333,17 @@ def should_fetch_next_page(
 
 
 def normalize_user(user: dict[str, Any], raw_user_json_file: str = "") -> dict[str, Any]:
-    first_name = str_or_empty(first_present(user, ("first_name", "firstName", "given_name", "givenName")))
-    last_name = str_or_empty(first_present(user, ("last_name", "lastName", "family_name", "familyName", "surname")))
-    full_name = str_or_empty(first_present(user, ("full_name", "fullName", "name", "display_name", "displayName")))
-    if not full_name:
-        full_name = " ".join(part for part in (first_name, last_name) if part)
-
-    access_policies = list_objects(first_present(user, ("access_policy", "access_policies", "accessPolicy", "accessPolicies")))
-    groups = list_objects(first_present(user, ("groups", "user_groups", "userGroups", "departments", "department")))
-    nfc_cards = list_objects(first_present(user, ("nfc_cards", "nfcCards", "cards", "access_cards", "accessCards")))
-    license_plates = list_objects(first_present(user, ("license_plates", "licensePlates", "vehicles", "plates")))
-    touch_pass = first_present(user, ("touch_pass", "touchPass", "mobile_credential", "mobileCredential"))
-    touch_pass_obj = touch_pass if isinstance(touch_pass, dict) else {}
-
-    return {
-        "id": str_or_empty(first_present(user, ("id", "user_id", "userId", "uuid"))),
-        "first_name": first_name,
-        "last_name": last_name,
-        "full_name": full_name,
-        "email": str_or_empty(first_present(user, ("email", "mail", "email_address", "emailAddress"))),
-        "employee_number": str_or_empty(first_present(user, ("employee_number", "employeeNumber", "employee_id", "employeeId"))),
-        "status": str_or_empty(first_present(user, ("status", "state", "user_status", "userStatus"))),
-        "onboard_time": str_or_empty(first_present(user, ("onboard_time", "onboardTime", "created_at", "createdAt"))),
-        "access_policy_ids": join_values(extract_ids(access_policies)),
-        "access_policy_names": join_values(extract_names(access_policies)),
-        "group_ids": join_values(extract_ids(groups)),
-        "group_names": join_values(extract_names(groups)),
-        "nfc_card_count": str(len(nfc_cards)),
-        "touch_pass_status": str_or_empty(first_present(touch_pass_obj, ("status", "state"))),
-        "touch_pass_last_activity": str_or_empty(first_present(touch_pass_obj, ("last_activity", "lastActivity", "last_used_at", "lastUsedAt"))),
-        "license_plate_count": str(len(license_plates)),
-        "raw_user_json_file": raw_user_json_file,
-    }
-
-
-def first_present(source: dict[str, Any], keys: Iterable[str]) -> Any:
-    if not isinstance(source, dict):
-        return None
-    for key in keys:
-        if key in source and source[key] not in (None, ""):
-            return source[key]
-    return None
-
-
-def str_or_empty(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, (dict, list)):
-        return json.dumps(value, sort_keys=True, separators=(",", ":"))
-    return str(value)
-
-
-def list_objects(value: Any) -> list[Any]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return value
-    return [value]
-
-
-def extract_ids(items: Iterable[Any]) -> list[str]:
-    values: list[str] = []
-    for item in items:
-        if isinstance(item, dict):
-            value = first_present(item, ("id", "policy_id", "policyId", "group_id", "groupId", "uuid"))
-        else:
-            value = item
-        if value not in (None, ""):
-            values.append(str(value))
-    return values
-
-
-def extract_names(items: Iterable[Any]) -> list[str]:
-    values: list[str] = []
-    for item in items:
-        if isinstance(item, dict):
-            value = first_present(item, ("name", "display_name", "displayName", "policy_name", "policyName"))
-        else:
-            value = item
-        if value not in (None, ""):
-            values.append(str(value))
-    return values
+    normalized = normalize_unifi_user(user, raw_file=raw_user_json_file)
+    row = dict(normalized)
+    for key in ("access_policy_ids", "access_policy_names", "group_ids", "group_names"):
+        row[key] = join_values(row[key])
+    row["nfc_card_count"] = str(row["nfc_card_count"])
+    row["license_plate_count"] = str(row["license_plate_count"])
+    return row
 
 
 def join_values(values: Iterable[str]) -> str:
     return ";".join(values)
-
-
-def sanitize_for_export(value: Any) -> Any:
-    if isinstance(value, dict):
-        sanitized: dict[str, Any] = {}
-        for key, nested in value.items():
-            if is_sensitive_key(key):
-                sanitized[key] = "[REDACTED]"
-            else:
-                sanitized[key] = sanitize_for_export(nested)
-        return sanitized
-    if isinstance(value, list):
-        return [sanitize_for_export(item) for item in value]
-    return value
-
-
-def is_sensitive_key(key: str) -> bool:
-    normalized = key.lower()
-    return any(part in normalized for part in SENSITIVE_KEY_PARTS)
 
 
 def write_json(path: Path, payload: Any) -> Path:
@@ -429,11 +361,21 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> Path:
     return path
 
 
+def write_lite_csv(path: Path, rows: list[dict[str, Any]]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=LITE_CSV_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+    return path
+
+
 def export_users(config: Config, users: list[dict[str, Any]]) -> tuple[Path | None, Path | None, Path]:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     raw_path = config.output_dir / f"unifi_access_users_raw_{timestamp}.json"
     normalized_path = config.output_dir / f"unifi_access_users_normalized_{timestamp}.json"
     csv_path = config.output_dir / f"unifi_access_users_{timestamp}.csv"
+    lite_csv_path = config.output_dir / f"Unifi_Acess_Users_Lite_{timestamp}.csv"
 
     raw_filename = raw_path.name
     normalized_users = [normalize_user(user, raw_user_json_file=raw_filename) for user in users]
@@ -447,6 +389,8 @@ def export_users(config: Config, users: list[dict[str, Any]]) -> tuple[Path | No
     write_json(raw_path, sanitized_raw)
     written_json_path = write_json(normalized_path, normalized_users) if config.export_json else None
     written_csv_path = write_csv(csv_path, normalized_users) if config.export_csv else None
+    if config.export_csv:
+        write_lite_csv(lite_csv_path, normalized_users)
 
     return written_csv_path, written_json_path, raw_path
 

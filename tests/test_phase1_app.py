@@ -198,10 +198,12 @@ def test_admin_bootstrap_export_and_import(app_context):
             employee_number="E100",
             first_name="Ada",
             last_name="Lovelace",
-            status="active",
-            access_policy_ids=["policy-1"],
-            raw_snapshot_json={"groups": [{"id": "group-1", "name": "Employees"}]},
-        )
+                status="active",
+                access_policy_ids=["policy-1"],
+                access_policy_names=["Front Door"],
+                group_ids=["group-1"],
+                group_names=["Employees"],
+            )
         session.add_all([company, suite, snapshot])
         session.commit()
         company_id = company.id
@@ -209,8 +211,7 @@ def test_admin_bootstrap_export_and_import(app_context):
 
     response = client.get("/admin/bootstrap")
     assert response.status_code == 200
-    assert "UniFi Access does not use the app" in response.text
-    assert "internal Access Profile field" in response.text
+    assert "AccessProfile is a local optional template concept" in response.text
 
     response = client.get("/admin/bootstrap/export")
     assert response.status_code == 200
@@ -218,6 +219,9 @@ def test_admin_bootstrap_export_and_import(app_context):
     assert response.headers["content-disposition"] == 'attachment; filename="all_unifi_users.csv"'
     rows = list(csv.DictReader(io.StringIO(response.text)))
     assert rows[0]["unifi_user_id"] == "u-1"
+    assert rows[0]["id"] == "u-1"
+    assert rows[0]["access_policy_names"] == "Front Door"
+    assert rows[0]["group_names"] == "Employees"
 
     response = client.get("/admin/bootstrap/reference-export")
     assert response.status_code == 200
@@ -245,7 +249,7 @@ def test_admin_bootstrap_export_and_import(app_context):
             "employee_number": "E100",
             "promote": "yes",
             "company_id": str(company_id),
-            "suite_id": str(suite_id),
+            "local_suite_id": str(suite_id),
             "desired_unifi_access_policy_ids": "policy-1",
             "desired_unifi_user_group_ids": "group-1",
             "notes": "Imported from bootstrap",
