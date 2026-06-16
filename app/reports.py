@@ -77,6 +77,8 @@ def _user_rows(session: Session, *, company_id: int | None = None, suite_id: int
 def _current_policy_names(unifi_user: UnifiUser | None) -> str:
     if unifi_user is None:
         return ""
+    if unifi_user.access_policy_names:
+        return _join_values(unifi_user.access_policy_names)
     names = _extract_item_names(
         unifi_user.raw_snapshot_json or {},
         ("access_policy", "access_policies", "accessPolicy", "accessPolicies"),
@@ -87,6 +89,8 @@ def _current_policy_names(unifi_user: UnifiUser | None) -> str:
 def _current_group_names(unifi_user: UnifiUser | None) -> str:
     if unifi_user is None:
         return ""
+    if unifi_user.group_names:
+        return _join_values(unifi_user.group_names)
     names = _extract_item_names(
         unifi_user.raw_snapshot_json or {},
         ("groups", "user_groups", "userGroups", "department", "departments"),

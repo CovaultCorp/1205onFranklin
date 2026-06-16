@@ -8,9 +8,11 @@ from sqlalchemy.orm import Session
 
 from app.models import AccessProfile, Company, Conflict, Suite, SyncJob, UnifiUser, User, utcnow
 from app.unifi_client import UniFiAccessClient
+from app.unifi_normalization import normalize_unifi_user, sanitize_for_snapshot
 
 ACTIVE_UNIFI_STATUSES = {"active", "enabled", "normal"}
 INACTIVE_UNIFI_STATUSES = {"inactive", "deactivated", "disabled", "suspended"}
+EMAIL_KEYS = ("email", "user_email", "userEmail", "mail", "email_address", "emailAddress")
 
 
 @dataclass
@@ -21,6 +23,8 @@ class ReconciliationSummary:
     conflicts_created: int = 0
     conflicts_existing: int = 0
     proposed_actions: list[dict[str, Any]] = field(default_factory=list)
+    email_key_counts: dict[str, int] = field(default_factory=dict)
+    users_without_email_key: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -30,6 +34,8 @@ class ReconciliationSummary:
             "conflicts_created": self.conflicts_created,
             "conflicts_existing": self.conflicts_existing,
             "proposed_action_count": len(self.proposed_actions),
+            "email_key_counts": self.email_key_counts,
+            "users_without_email_key": self.users_without_email_key,
         }
 
 
@@ -53,30 +59,30 @@ def _first_present(payload: dict[str, Any], keys: tuple[str, ...]) -> Any:
 
 
 def _unifi_id(payload: dict[str, Any]) -> str:
-    value = _first_present(payload, ("id", "user_id", "userId"))
-    if value is None:
+    value = normalize_unifi_user(payload)["id"]
+    if not value:
         raise ValueError("UniFi user payload is missing an id")
     return str(value)
 
 
 def _employee_number(payload: dict[str, Any]) -> str | None:
-    return _text(_first_present(payload, ("employeeNumber", "employee_number", "employeeNo")))
+    return _text(normalize_unifi_user(payload)["employee_number"])
 
 
 def _first_name(payload: dict[str, Any]) -> str | None:
-    return _text(_first_present(payload, ("firstName", "first_name", "first")))
+    return _text(normalize_unifi_user(payload)["first_name"])
 
 
 def _last_name(payload: dict[str, Any]) -> str | None:
-    return _text(_first_present(payload, ("lastName", "last_name", "last")))
+    return _text(normalize_unifi_user(payload)["last_name"])
 
 
 def _email(payload: dict[str, Any]) -> str | None:
-    return _lower(_first_present(payload, ("email", "mail")))
+    return _lower(normalize_unifi_user(payload)["email"])
 
 
 def _status(payload: dict[str, Any]) -> str | None:
-    return _lower(_first_present(payload, ("status", "state")))
+    return _lower(normalize_unifi_user(payload)["status"])
 
 
 def _ids_from_collection(value: Any) -> list[str]:
@@ -99,10 +105,16 @@ def _ids_from_collection(value: Any) -> list[str]:
 
 
 def _access_policy_ids(payload: dict[str, Any]) -> list[str]:
-    ids: list[str] = []
-    for key in ("access_policy", "accessPolicy", "access_policies", "accessPolicies", "access_policy_ids", "accessPolicyIds"):
-        ids.extend(_ids_from_collection(payload.get(key)))
-    return sorted(set(ids))
+    return sorted(set(normalize_unifi_user(payload)["access_policy_ids"]))
+
+
+def _record_email_key_presence(summary: ReconciliationSummary, payload: dict[str, Any]) -> None:
+    present = [key for key in EMAIL_KEYS if payload.get(key) not in (None, "")]
+    if not present:
+        summary.users_without_email_key += 1
+        return
+    for key in present:
+        summary.email_key_counts[key] = summary.email_key_counts.get(key, 0) + 1
 
 
 def _is_unifi_active(status: str | None) -> bool:
@@ -137,6 +149,10 @@ def _snapshot_state(snapshot: UnifiUser) -> dict[str, Any]:
         "last_name": snapshot.last_name,
         "status": snapshot.status,
         "access_policy_ids": snapshot.access_policy_ids or [],
+        "access_policy_names": snapshot.access_policy_names or [],
+        "group_ids": snapshot.group_ids or [],
+        "group_names": snapshot.group_names or [],
+        "suite_number": snapshot.suite_number,
     }
 
 
@@ -209,20 +225,38 @@ def _record_conflict(
 
 
 def _upsert_snapshot(session: Session, payload: dict[str, Any], local_user: User | None) -> UnifiUser:
-    unifi_user_id = _unifi_id(payload)
+    normalized = normalize_unifi_user(payload)
+    unifi_user_id = normalized["id"]
+    if not unifi_user_id:
+        raise ValueError("UniFi user payload is missing an id")
     snapshot = session.scalar(select(UnifiUser).where(UnifiUser.unifi_user_id == unifi_user_id))
     now = utcnow()
     if snapshot is None:
         snapshot = UnifiUser(unifi_user_id=unifi_user_id)
         session.add(snapshot)
     snapshot.local_user_id = local_user.id if local_user else snapshot.local_user_id
-    snapshot.email = _email(payload)
-    snapshot.employee_number = _employee_number(payload)
-    snapshot.first_name = _first_name(payload)
-    snapshot.last_name = _last_name(payload)
-    snapshot.status = _status(payload)
-    snapshot.access_policy_ids = _access_policy_ids(payload)
-    snapshot.raw_snapshot_json = payload
+    snapshot.email = normalized["email"] or None
+    snapshot.email_status = normalized["email_status"] or None
+    snapshot.employee_number = normalized["employee_number"] or None
+    snapshot.suite_number = normalized["suite_number"] or None
+    snapshot.first_name = normalized["first_name"] or None
+    snapshot.last_name = normalized["last_name"] or None
+    snapshot.full_name = normalized["full_name"] or None
+    snapshot.phone = normalized["phone"] or None
+    snapshot.username = normalized["username"] or None
+    snapshot.alias = normalized["alias"] or None
+    snapshot.status = normalized["status"] or None
+    snapshot.onboard_time = normalized["onboard_time"] or None
+    snapshot.access_policy_ids = normalized["access_policy_ids"]
+    snapshot.access_policy_names = normalized["access_policy_names"]
+    snapshot.group_ids = normalized["group_ids"]
+    snapshot.group_names = normalized["group_names"]
+    snapshot.nfc_card_count = normalized["nfc_card_count"]
+    snapshot.touch_pass_status = normalized["touch_pass_status"] or None
+    snapshot.touch_pass_last_activity = normalized["touch_pass_last_activity"] or None
+    snapshot.license_plate_count = normalized["license_plate_count"]
+    snapshot.raw_user_json_file = normalized["raw_user_json_file"] or None
+    snapshot.raw_snapshot_json = sanitize_for_snapshot(payload)
     snapshot.last_seen_at = now
     snapshot.last_synced_at = now
     session.flush()
@@ -431,6 +465,7 @@ async def run_unifi_reconciliation(
     snapshots: list[UnifiUser] = []
 
     for payload in payloads:
+        _record_email_key_presence(summary, payload)
         existing_snapshot = session.scalar(select(UnifiUser).where(UnifiUser.unifi_user_id == _unifi_id(payload)))
         local_user, match_method = _find_local_match(session, payload, existing_snapshot)
         snapshot = _upsert_snapshot(session, payload, local_user)

@@ -209,6 +209,64 @@ async def test_reconciliation_does_not_call_write_methods(db_context):
 
 
 @pytest.mark.anyio
+async def test_reconciliation_stores_exporter_compatible_normalized_fields(db_context):
+    session_factory, _ = db_context
+    from app.models import UnifiUser
+    from app.reconcile import run_unifi_reconciliation
+
+    with session_factory() as session:
+        job, summary = await run_unifi_reconciliation(
+            session,
+            client=FakeUniFiClient(
+                [
+                    {
+                        "uuid": "u-compat",
+                        "givenName": "Ada",
+                        "familyName": "Lovelace",
+                        "userEmail": "Ada@Example.com",
+                        "emailStatus": "verified",
+                        "employeeId": "120999",
+                        "phoneNumber": "555-0100",
+                        "userName": "alovelace",
+                        "alias": "Countess",
+                        "state": "active",
+                        "onboardTime": "2026-01-02T03:04:05Z",
+                        "accessPolicies": [{"policyId": "policy-1", "policyName": "Front Door"}],
+                        "userGroups": [{"groupId": "group-1", "groupName": "Employees"}],
+                        "nfcCards": [{"id": "card-1"}],
+                        "touchPass": {"status": "enabled", "lastActivity": "2026-01-03T00:00:00Z"},
+                        "licensePlates": [{"plate": "ABC"}],
+                    }
+                ]
+            ),
+        )
+        session.commit()
+
+        snapshot = session.scalar(select(UnifiUser).where(UnifiUser.unifi_user_id == "u-compat"))
+
+        assert summary.email_key_counts == {"userEmail": 1}
+        assert summary.users_without_email_key == 0
+        assert job.result_json["email_key_counts"] == {"userEmail": 1}
+        assert snapshot.email == "ada@example.com"
+        assert snapshot.email_status == "verified"
+        assert snapshot.suite_number == "120"
+        assert snapshot.phone == "555-0100"
+        assert snapshot.username == "alovelace"
+        assert snapshot.alias == "Countess"
+        assert snapshot.onboard_time == "2026-01-02T03:04:05Z"
+        assert snapshot.access_policy_ids == ["policy-1"]
+        assert snapshot.access_policy_names == ["Front Door"]
+        assert snapshot.group_ids == ["group-1"]
+        assert snapshot.group_names == ["Employees"]
+        assert snapshot.nfc_card_count == 1
+        assert snapshot.touch_pass_status == "enabled"
+        assert snapshot.touch_pass_last_activity == "2026-01-03T00:00:00Z"
+        assert snapshot.license_plate_count == 1
+        assert snapshot.raw_snapshot_json["nfcCards"] == "[REDACTED]"
+        assert snapshot.raw_snapshot_json["licensePlates"] == "[REDACTED]"
+
+
+@pytest.mark.anyio
 async def test_unifi_write_guard_still_blocks_writes(monkeypatch):
     monkeypatch.setenv("ENABLE_WRITES", "false")
     import app.config

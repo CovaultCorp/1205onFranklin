@@ -44,6 +44,7 @@ Implemented:
 - Admin "Run UniFi Reconciliation" action, reconciliation summary, improved conflict view, and improved sync job view.
 - CLI entry point: `python scripts/run_reconcile.py`.
 - Local-only bootstrap CSV and reference ZIP workflow to promote unlinked UniFi snapshots, update linked local users, and store desired UniFi Access Policy/User Group choices.
+- Exporter-compatible UniFi snapshot normalization, including non-admin email fallbacks, suite number derivation, policy/group names, NFC counts, Touch Pass status/activity, and license plate counts.
 
 Not implemented in Phase 2:
 
@@ -69,7 +70,8 @@ Workflow:
 5. Fill in `promote=yes` for unlinked UniFi users to create or link local registry users.
 6. Fill in `update_existing=yes` for linked users whose local registry fields should be updated.
 7. Assign each imported row to existing local Company and Suite records, and desired UniFi Access Policy/User Group values, using either IDs or names.
-8. Upload the completed `all_unifi_users.csv`.
+8. Use `local_suite_id` or `local_suite_number` for the local registry suite. The exported `suite_number` column is the UniFi-derived compatibility value and can also be used by import when the local suite column is blank.
+9. Import a small test batch first, then upload the completed `all_unifi_users.csv`.
 
 The reference ZIP contains:
 
@@ -88,7 +90,7 @@ CSV import:
 - Updates linked local users only when `update_existing=yes`.
 - Skips rows where both `promote` and `update_existing` are blank.
 - Resolves `company_id` or `company_name`.
-- Resolves `suite_id` or `suite_number`.
+- Resolves `local_suite_id`, `local_suite_number`, or the old exporter `suite_number`.
 - Resolves desired UniFi Access Policy/User Group selections by ID or by name.
 - Rejects rows with missing or ambiguous name lookups.
 - Sets `company_id`, `primary_suite_id`, `desired_unifi_access_policy_ids`, and `desired_unifi_user_group_ids`.
@@ -98,6 +100,8 @@ CSV import:
 - Does not call UniFi write APIs.
 
 UniFi Access does not use the app's internal `AccessProfile` field. Access Profiles remain available as optional local templates for other workflows, but the bootstrap master sheet uses the user-facing Company, Suite, UniFi Access Policy, and UniFi User Group terms.
+
+Suite number normalization prefers explicit UniFi fields `suite_number`, `suiteNumber`, or `suite`. If none is present, the app falls back to the first three digits found in `employee_number`, matching the older exporter behavior used by the current building workflow.
 
 ## Required Environment Variables
 

@@ -20,12 +20,13 @@
     <li>Run UniFi reconciliation first.</li>
     <li>Export all UniFi users.</li>
     <li>Open the CSV.</li>
-    <li>For each user to add or update, fill in promote or update_existing, Company, Suite, desired UniFi Access Policy, and desired UniFi User Group columns.</li>
+    <li>For each user to add or update, fill in promote or update_existing, company_id or company_name, local_suite_id or local_suite_number, desired UniFi Access Policy, and desired UniFi User Group columns.</li>
+    <li>Import a small test batch first.</li>
     <li>Import the CSV.</li>
     <li>Rerun UniFi reconciliation.</li>
     <li>Review remaining conflicts.</li>
   </ol>
-  <p>UniFi Access does not use the app's internal Access Profile field. For bootstrap, use UniFi Access Policy and UniFi User Group columns. Access Profiles are optional local templates that may be used later.</p>
+  <p>AccessProfile is a local optional template concept. UniFi Access uses Access Policies and User Groups. Bootstrap imports do not require AccessProfile.</p>
 </section>
 
 {% if summary %}

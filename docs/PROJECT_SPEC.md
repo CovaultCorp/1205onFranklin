@@ -321,11 +321,26 @@ Fields:
 * local_user_id
 * unifi_user_id
 * email
+* email_status
 * employee_number
+* suite_number
 * first_name
 * last_name
+* full_name
+* phone
+* username
+* alias
 * status
+* onboard_time
 * access_policy_ids
+* access_policy_names
+* group_ids
+* group_names
+* nfc_card_count
+* touch_pass_status
+* touch_pass_last_activity
+* license_plate_count
+* raw_user_json_file
 * raw_snapshot_json
 * last_seen_at
 * last_synced_at
@@ -595,7 +610,10 @@ v1 restrictions:
 Reconciliation should:
 
 * Pull users from UniFi.
-* Upsert UnifiUser snapshots.
+* Normalize each UniFi user with the compatibility extractor before matching or storing.
+* Upsert all returned `UnifiUser` snapshots, not only admin users.
+* Store exporter-compatible normalized fields, including fallback email fields, suite number, phone, username, alias, onboard time, policies, groups, NFC count, Touch Pass status/activity, and license plate count.
+* Store sanitized raw snapshots only; card, license plate, PIN, credential, token, password, and secret-like fields must be redacted.
 * Match users by:
 
   1. existing UniFi user ID mapping
@@ -627,11 +645,14 @@ Rules:
 * Bootstrap operates on local database records only.
 * Bootstrap must not call UniFi write APIs.
 * `/admin/bootstrap/export` exports all locally stored `UnifiUser` snapshots to `all_unifi_users.csv`, including linked and unlinked users.
+* Bootstrap CSV includes the old exporter fields: `id`, `first_name`, `last_name`, `full_name`, `email`, `email_status`, `employee_number`, `suite_number`, `phone`, `username`, `alias`, `status`, `onboard_time`, `access_policy_ids`, `access_policy_names`, `group_ids`, `group_names`, `nfc_card_count`, `touch_pass_status`, `touch_pass_last_activity`, `license_plate_count`, and `raw_user_json_file`.
+* Bootstrap CSV separates the UniFi-derived `suite_number` from local registry enrichment fields `local_suite_id` and `local_suite_number`.
 * CSV import promotes unlinked snapshots only when explicitly marked with `promote=yes`.
 * CSV import updates linked local users only when explicitly marked with `update_existing=yes`.
 * CSV import skips rows where both `promote` and `update_existing` are blank.
 * Reference export must provide companies, suites, UniFi access policies, UniFi user groups, and all UniFi users in a ZIP.
 * CSV import must resolve company and suite to existing local records by ID or by name/number.
+* CSV import accepts Suite by `local_suite_id`, `local_suite_number`, or the old exporter `suite_number` field.
 * CSV import must resolve desired UniFi Access Policy and UniFi User Group selections by ID or by name.
 * CSV import must reject a row when name/number lookup is missing or ambiguous.
 * CSV import must not create duplicate users; existing users are matched by employee number, then email.
@@ -640,6 +661,7 @@ Rules:
 * CSV import creates `AuditLog` records.
 * Bootstrap UI must use the user-facing terms Company, Suite, UniFi Access Policy, and UniFi User Group.
 * UniFi Access does not use the app's internal `AccessProfile` field; access profiles remain optional local templates and are not required for bootstrap.
+* Suite number normalization prefers explicit UniFi fields `suite_number`, `suiteNumber`, or `suite`; if absent, it falls back to the first three digits found in `employee_number`. This fallback is retained for compatibility with the current building registry workflow.
 
 Required bootstrap routes:
 

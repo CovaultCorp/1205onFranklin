@@ -18,31 +18,37 @@ COMPANY_FIELDS = ["id", "name", "legal_name", "status", "primary_contact_name", 
 SUITE_FIELDS = ["id", "suite_number", "floor", "building_area", "description", "status"]
 UNIFI_REFERENCE_FIELDS = ["id", "name", "description", "status"]
 BOOTSTRAP_COLUMNS = [
+    "id",
     "unifi_user_id",
-    "linked_local_user_id",
-    "is_linked",
     "first_name",
     "last_name",
     "full_name",
     "email",
+    "email_status",
     "employee_number",
-    "unifi_status",
+    "suite_number",
+    "phone",
+    "username",
+    "alias",
+    "status",
     "onboard_time",
-    "current_unifi_access_policy_ids",
-    "current_unifi_access_policy_names",
-    "current_unifi_user_group_ids",
-    "current_unifi_user_group_names",
+    "access_policy_ids",
+    "access_policy_names",
+    "group_ids",
+    "group_names",
     "nfc_card_count",
     "touch_pass_status",
     "touch_pass_last_activity",
     "license_plate_count",
-    "raw_snapshot_reference",
+    "raw_user_json_file",
+    "linked_local_user_id",
+    "is_linked",
     "promote",
     "update_existing",
     "company_id",
     "company_name",
-    "suite_id",
-    "suite_number",
+    "local_suite_id",
+    "local_suite_number",
     "desired_unifi_access_policy_ids",
     "desired_unifi_access_policy_names",
     "desired_unifi_user_group_ids",
@@ -131,9 +137,9 @@ def import_bootstrap_users_csv(
 ) -> BootstrapImportSummary:
     summary = BootstrapImportSummary()
     reader = csv.DictReader(StringIO(csv_text))
-    missing_columns = [column for column in BOOTSTRAP_COLUMNS if column not in (reader.fieldnames or [])]
-    if missing_columns:
-        summary.errors.append(f"Missing required columns: {', '.join(missing_columns)}")
+    fieldnames = reader.fieldnames or []
+    if "id" not in fieldnames and "unifi_user_id" not in fieldnames:
+        summary.errors.append("Missing required column: id or unifi_user_id")
         return summary
 
     policy_refs = unifi_access_policies or []
@@ -147,9 +153,9 @@ def import_bootstrap_users_csv(
             summary.rows_skipped += 1
             continue
 
-        unifi_user_id = _norm(row.get("unifi_user_id"))
+        unifi_user_id = _norm(row.get("unifi_user_id")) or _norm(row.get("id"))
         if not unifi_user_id:
-            summary.errors.append(f"Row {row_number}: unifi_user_id is required.")
+            summary.errors.append(f"Row {row_number}: id or unifi_user_id is required.")
             continue
         snapshot = session.scalar(select(UnifiUser).where(UnifiUser.unifi_user_id == unifi_user_id))
         if snapshot is None:
@@ -177,16 +183,19 @@ def import_bootstrap_users_csv(
             required=promote or _has_any(row, "company_id", "company_name"),
             errors=row_errors,
         )
+        suite_lookup_row = dict(row)
+        suite_lookup_row["local_suite_id"] = _norm(row.get("local_suite_id")) or _norm(row.get("suite_id"))
+        suite_lookup_row["local_suite_number"] = _norm(row.get("local_suite_number")) or _norm(row.get("suite_number"))
         suite = _resolve_reference(
             session,
-            row,
+            suite_lookup_row,
             row_number=row_number,
             model=Suite,
             label="suite",
-            id_field="suite_id",
-            name_field="suite_number",
+            id_field="local_suite_id",
+            name_field="local_suite_number",
             name_attribute="suite_number",
-            required=promote or _has_any(row, "suite_id", "suite_number"),
+            required=promote or _has_any(suite_lookup_row, "local_suite_id", "local_suite_number"),
             errors=row_errors,
         )
         desired_policy_ids, desired_policy_names = _resolve_unifi_selection(
@@ -282,43 +291,49 @@ def _unifi_user_export_row(
     linked_user = session.get(User, snapshot.local_user_id) if snapshot.local_user_id else None
     company = linked_user.company if linked_user else None
     suite = linked_user.primary_suite if linked_user else None
-    policy_ids = [str(value) for value in (snapshot.access_policy_ids or _extract_item_ids(raw_snapshot, ("access_policy", "access_policies", "accessPolicy", "accessPolicies")))]
-    policy_names = _names_for_ids(policy_ids, policy_names_by_id) or _extract_item_names(
+    policy_ids = [str(value) for value in (snapshot.access_policy_ids or [])]
+    policy_names = snapshot.access_policy_names or _names_for_ids(policy_ids, policy_names_by_id) or _extract_item_names(
         raw_snapshot, ("access_policy", "access_policies", "accessPolicy", "accessPolicies")
     )
-    group_ids = _extract_item_ids(raw_snapshot, ("groups", "user_groups", "userGroups", "department", "departments"))
-    group_names = _names_for_ids(group_ids, group_names_by_id) or _extract_item_names(
+    group_ids = [str(value) for value in (snapshot.group_ids or [])]
+    group_names = snapshot.group_names or _names_for_ids(group_ids, group_names_by_id) or _extract_item_names(
         raw_snapshot, ("groups", "user_groups", "userGroups", "department", "departments")
     )
-    full_name = _norm(_first_present(raw_snapshot, ("full_name", "fullName", "name", "display_name", "displayName"))) or " ".join(
+    full_name = snapshot.full_name or _norm(_first_present(raw_snapshot, ("full_name", "fullName", "name", "display_name", "displayName"))) or " ".join(
         part for part in (snapshot.first_name, snapshot.last_name) if part
     )
     return {
+        "id": snapshot.unifi_user_id,
         "unifi_user_id": snapshot.unifi_user_id,
-        "linked_local_user_id": linked_user.id if linked_user else "",
-        "is_linked": "yes" if linked_user else "no",
         "first_name": snapshot.first_name or "",
         "last_name": snapshot.last_name or "",
         "full_name": full_name,
         "email": snapshot.email or "",
+        "email_status": snapshot.email_status or "",
         "employee_number": snapshot.employee_number or "",
-        "unifi_status": snapshot.status or "",
-        "onboard_time": _norm(_first_present(raw_snapshot, ("onboard_time", "onboardTime", "created_at", "createdAt"))),
-        "current_unifi_access_policy_ids": _join(policy_ids),
-        "current_unifi_access_policy_names": _join(policy_names),
-        "current_unifi_user_group_ids": _join(group_ids),
-        "current_unifi_user_group_names": _join(group_names),
-        "nfc_card_count": str(len(_extract_items(raw_snapshot, ("nfc_cards", "nfcCards", "cards", "access_cards", "accessCards")))),
-        "touch_pass_status": _touch_pass_value(raw_snapshot, ("status", "state")),
-        "touch_pass_last_activity": _touch_pass_value(raw_snapshot, ("last_activity", "lastActivity", "last_used_at", "lastUsedAt")),
-        "license_plate_count": str(len(_extract_items(raw_snapshot, ("license_plates", "licensePlates", "vehicles", "plates")))),
-        "raw_snapshot_reference": f"unifi_users:{snapshot.id}",
+        "suite_number": snapshot.suite_number or "",
+        "phone": snapshot.phone or "",
+        "username": snapshot.username or "",
+        "alias": snapshot.alias or "",
+        "status": snapshot.status or "",
+        "onboard_time": snapshot.onboard_time or "",
+        "access_policy_ids": _join(policy_ids),
+        "access_policy_names": _join(policy_names),
+        "group_ids": _join(group_ids),
+        "group_names": _join(group_names),
+        "nfc_card_count": snapshot.nfc_card_count if snapshot.nfc_card_count is not None else "",
+        "touch_pass_status": snapshot.touch_pass_status or "",
+        "touch_pass_last_activity": snapshot.touch_pass_last_activity or "",
+        "license_plate_count": snapshot.license_plate_count if snapshot.license_plate_count is not None else "",
+        "raw_user_json_file": snapshot.raw_user_json_file or f"unifi_users:{snapshot.id}",
+        "linked_local_user_id": linked_user.id if linked_user else "",
+        "is_linked": "yes" if linked_user else "no",
         "promote": "",
         "update_existing": "",
         "company_id": linked_user.company_id if linked_user and linked_user.company_id else "",
         "company_name": company.name if company else "",
-        "suite_id": linked_user.primary_suite_id if linked_user and linked_user.primary_suite_id else "",
-        "suite_number": suite.suite_number if suite else "",
+        "local_suite_id": linked_user.primary_suite_id if linked_user and linked_user.primary_suite_id else "",
+        "local_suite_number": suite.suite_number if suite else "",
         "desired_unifi_access_policy_ids": _join(linked_user.desired_unifi_access_policy_ids or []) if linked_user else "",
         "desired_unifi_access_policy_names": _join(linked_user.desired_unifi_access_policy_names or []) if linked_user else "",
         "desired_unifi_user_group_ids": _join(linked_user.desired_unifi_user_group_ids or []) if linked_user else "",
