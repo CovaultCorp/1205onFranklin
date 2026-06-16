@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models import AccessProfile, Company, Conflict, Suite, SyncJob, UnifiUser, User, utcnow
 from app.unifi_client import UniFiAccessClient
-from app.unifi_normalization import normalize_unifi_user, sanitize_for_snapshot
+from app.unifi_normalization import all_present_key_paths, normalize_unifi_user, sanitize_for_snapshot
 
 ACTIVE_UNIFI_STATUSES = {"active", "enabled", "normal"}
 INACTIVE_UNIFI_STATUSES = {"inactive", "deactivated", "disabled", "suspended"}
@@ -109,12 +109,12 @@ def _access_policy_ids(payload: dict[str, Any]) -> list[str]:
 
 
 def _record_email_key_presence(summary: ReconciliationSummary, payload: dict[str, Any]) -> None:
-    present = [key for key in EMAIL_KEYS if payload.get(key) not in (None, "")]
+    present = all_present_key_paths(payload, EMAIL_KEYS)
     if not present:
         summary.users_without_email_key += 1
         return
-    for key in present:
-        summary.email_key_counts[key] = summary.email_key_counts.get(key, 0) + 1
+    for key_path in present:
+        summary.email_key_counts[key_path] = summary.email_key_counts.get(key_path, 0) + 1
 
 
 def _is_unifi_active(status: str | None) -> bool:
@@ -465,6 +465,7 @@ async def run_unifi_reconciliation(
     snapshots: list[UnifiUser] = []
 
     for payload in payloads:
+        payload = await _enrich_payload_with_detail(client, payload)
         _record_email_key_presence(summary, payload)
         existing_snapshot = session.scalar(select(UnifiUser).where(UnifiUser.unifi_user_id == _unifi_id(payload)))
         local_user, match_method = _find_local_match(session, payload, existing_snapshot)
@@ -524,3 +525,31 @@ async def run_unifi_reconciliation(
     session.add(job)
     session.flush()
     return job, summary
+
+
+async def _enrich_payload_with_detail(client: UniFiAccessClient, payload: dict[str, Any]) -> dict[str, Any]:
+    if not hasattr(client, "get_user"):
+        return payload
+    unifi_user_id = normalize_unifi_user(payload)["id"]
+    if not unifi_user_id:
+        return payload
+    try:
+        detail = await client.get_user(unifi_user_id)
+    except Exception:
+        return payload
+    if not isinstance(detail, dict) or not detail:
+        return payload
+    return _deep_merge_payload(payload, detail)
+
+
+def _deep_merge_payload(base: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, detail_value in detail.items():
+        if detail_value in (None, ""):
+            continue
+        base_value = merged.get(key)
+        if isinstance(base_value, dict) and isinstance(detail_value, dict):
+            merged[key] = _deep_merge_payload(base_value, detail_value)
+        else:
+            merged[key] = detail_value
+    return merged

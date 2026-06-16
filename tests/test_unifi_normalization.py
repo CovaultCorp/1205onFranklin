@@ -80,3 +80,22 @@ def test_suite_number_falls_back_to_first_three_digits_of_employee_number() -> N
     normalized = normalize_unifi_user({"id": "u-1", "employeeNumber": "120999"})
 
     assert normalized["suite_number"] == "120"
+
+
+def test_normalization_reads_profile_nested_email_status_and_suite() -> None:
+    normalized = normalize_unifi_user(
+        {
+            "id": "u-1",
+            "profile": {
+                "emailAddress": "Nested@Example.com",
+                "emailStatus": "verified",
+                "suiteNumber": "1700",
+                "phoneNumber": "555-0170",
+            },
+        }
+    )
+
+    assert normalized["email"] == "nested@example.com"
+    assert normalized["email_status"] == "verified"
+    assert normalized["suite_number"] == "1700"
+    assert normalized["phone"] == "555-0170"

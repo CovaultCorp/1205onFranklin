@@ -21,6 +21,17 @@ SENSITIVE_KEY_PARTS = (
     "plate",
     "webhook",
 )
+PROFILE_CONTAINER_KEYS = (
+    "user",
+    "user_info",
+    "userInfo",
+    "profile",
+    "person",
+    "employee",
+    "identity",
+    "account",
+    "contact",
+)
 
 
 def first_present(source: dict[str, Any], keys: Iterable[str]) -> Any:
@@ -30,6 +41,23 @@ def first_present(source: dict[str, Any], keys: Iterable[str]) -> Any:
         if key in source and source[key] not in (None, ""):
             return source[key]
     return None
+
+
+def first_present_nested(source: dict[str, Any], keys: Iterable[str]) -> Any:
+    value = first_present(source, keys)
+    if value not in (None, ""):
+        return value
+    for nested in _profile_sources(source):
+        value = first_present(nested, keys)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def all_present_key_paths(source: dict[str, Any], keys: Iterable[str]) -> list[str]:
+    found: list[str] = []
+    _collect_key_paths(source, set(keys), found, prefix="")
+    return found
 
 
 def as_text(value: Any) -> str:
@@ -75,18 +103,18 @@ def names(items: Iterable[Any]) -> list[str]:
 
 
 def suite_number(user: dict[str, Any]) -> str:
-    explicit = as_text(first_present(user, ("suite_number", "suiteNumber", "suite")))
+    explicit = as_text(first_present_nested(user, ("suite_number", "suiteNumber", "suite")))
     if explicit:
         return explicit
-    employee_number = as_text(first_present(user, ("employee_number", "employeeNumber", "employee_id", "employeeId")))
+    employee_number = as_text(first_present_nested(user, ("employee_number", "employeeNumber", "employee_id", "employeeId")))
     match = re.search(r"\d{3}", employee_number)
     return match.group(0) if match else ""
 
 
 def normalize_unifi_user(user: dict[str, Any], raw_file: str | None = None) -> dict[str, Any]:
-    first_name = as_text(first_present(user, ("first_name", "firstName", "given_name", "givenName")))
-    last_name = as_text(first_present(user, ("last_name", "lastName", "family_name", "familyName", "surname")))
-    full_name = as_text(first_present(user, ("full_name", "fullName", "name", "display_name", "displayName")))
+    first_name = as_text(first_present_nested(user, ("first_name", "firstName", "given_name", "givenName")))
+    last_name = as_text(first_present_nested(user, ("last_name", "lastName", "family_name", "familyName", "surname")))
+    full_name = as_text(first_present_nested(user, ("full_name", "fullName", "name", "display_name", "displayName")))
     if not full_name:
         full_name = " ".join(part for part in (first_name, last_name) if part)
 
@@ -98,19 +126,19 @@ def normalize_unifi_user(user: dict[str, Any], raw_file: str | None = None) -> d
     touch_pass_obj = touch_pass if isinstance(touch_pass, dict) else {}
 
     return {
-        "id": as_text(first_present(user, ("id", "user_id", "userId", "uuid"))),
+        "id": as_text(first_present(user, ("id", "user_id", "userId", "uuid")) or _first_present_in_profile(user, ("id", "user_id", "userId", "uuid"))),
         "first_name": first_name,
         "last_name": last_name,
         "full_name": full_name,
-        "email": as_text(first_present(user, ("email", "user_email", "userEmail", "mail", "email_address", "emailAddress"))).casefold(),
-        "email_status": as_text(first_present(user, ("email_status", "emailStatus"))),
-        "employee_number": as_text(first_present(user, ("employee_number", "employeeNumber", "employee_id", "employeeId"))),
+        "email": as_text(first_present_nested(user, ("email", "user_email", "userEmail", "mail", "email_address", "emailAddress"))).casefold(),
+        "email_status": as_text(first_present_nested(user, ("email_status", "emailStatus"))),
+        "employee_number": as_text(first_present_nested(user, ("employee_number", "employeeNumber", "employee_id", "employeeId"))),
         "suite_number": suite_number(user),
-        "phone": as_text(first_present(user, ("phone", "phone_number", "phoneNumber", "mobile", "mobile_phone", "mobilePhone"))),
-        "username": as_text(first_present(user, ("username", "user_name", "userName"))),
-        "alias": as_text(first_present(user, ("alias", "nickname"))),
-        "status": as_text(first_present(user, ("status", "state", "user_status", "userStatus"))).casefold(),
-        "onboard_time": as_text(first_present(user, ("onboard_time", "onboardTime", "created_at", "createdAt"))),
+        "phone": as_text(first_present_nested(user, ("phone", "phone_number", "phoneNumber", "mobile", "mobile_phone", "mobilePhone"))),
+        "username": as_text(first_present_nested(user, ("username", "user_name", "userName"))),
+        "alias": as_text(first_present_nested(user, ("alias", "nickname"))),
+        "status": as_text(first_present_nested(user, ("status", "state", "user_status", "userStatus"))).casefold(),
+        "onboard_time": as_text(first_present_nested(user, ("onboard_time", "onboardTime", "created_at", "createdAt"))),
         "access_policy_ids": ids(access_policies),
         "access_policy_names": names(access_policies),
         "group_ids": ids(groups),
@@ -137,3 +165,32 @@ def sanitize_for_snapshot(value: Any) -> Any:
 def _is_sensitive_key(key: str) -> bool:
     normalized = key.lower()
     return any(part in normalized for part in SENSITIVE_KEY_PARTS)
+
+
+def _first_present_in_profile(source: dict[str, Any], keys: Iterable[str]) -> Any:
+    for nested in _profile_sources(source):
+        value = first_present(nested, keys)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _profile_sources(source: dict[str, Any]) -> list[dict[str, Any]]:
+    sources: list[dict[str, Any]] = []
+    for key in PROFILE_CONTAINER_KEYS:
+        value = source.get(key)
+        if isinstance(value, dict):
+            sources.append(value)
+    return sources
+
+
+def _collect_key_paths(value: Any, keys: set[str], found: list[str], *, prefix: str) -> None:
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            path = f"{prefix}.{key}" if prefix else key
+            if key in keys and nested not in (None, ""):
+                found.append(path)
+            _collect_key_paths(nested, keys, found, prefix=path)
+    elif isinstance(value, list):
+        for index, nested in enumerate(value):
+            _collect_key_paths(nested, keys, found, prefix=f"{prefix}[{index}]")

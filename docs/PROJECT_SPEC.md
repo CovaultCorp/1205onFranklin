@@ -610,6 +610,7 @@ v1 restrictions:
 Reconciliation should:
 
 * Pull users from UniFi.
+* Enrich list results with read-only `get_user` detail payloads before normalization when available, because the UniFi list response may omit non-admin email and profile fields.
 * Normalize each UniFi user with the compatibility extractor before matching or storing.
 * Upsert all returned `UnifiUser` snapshots, not only admin users.
 * Store exporter-compatible normalized fields, including fallback email fields, suite number, phone, username, alias, onboard time, policies, groups, NFC count, Touch Pass status/activity, and license plate count.

@@ -43,6 +43,26 @@ class FakeUniFiClient:
         raise AssertionError("reconciliation must not call write methods")
 
 
+class FakeDetailUniFiClient:
+    def __init__(self, users, details):
+        self.users = users
+        self.details = details
+        self.detail_calls: list[str] = []
+        self.write_calls = 0
+
+    async def list_users(self, expand_access_policy: bool = True):
+        assert expand_access_policy is True
+        return self.users
+
+    async def get_user(self, unifi_user_id: str):
+        self.detail_calls.append(unifi_user_id)
+        return self.details.get(unifi_user_id)
+
+    async def create_user(self, payload):
+        self.write_calls += 1
+        raise AssertionError("reconciliation must not call write methods")
+
+
 @pytest.mark.anyio
 async def test_unifi_read_methods_paginate_and_fetch_resources(monkeypatch):
     monkeypatch.setenv("UNIFI_ACCESS_TOKEN", "test-token")
@@ -264,6 +284,39 @@ async def test_reconciliation_stores_exporter_compatible_normalized_fields(db_co
         assert snapshot.license_plate_count == 1
         assert snapshot.raw_snapshot_json["nfcCards"] == "[REDACTED]"
         assert snapshot.raw_snapshot_json["licensePlates"] == "[REDACTED]"
+
+
+@pytest.mark.anyio
+async def test_reconciliation_enriches_list_users_with_read_only_detail_payload(db_context):
+    session_factory, _ = db_context
+    from app.models import UnifiUser
+    from app.reconcile import run_unifi_reconciliation
+
+    client = FakeDetailUniFiClient(
+        users=[{"id": "u-nonadmin", "firstName": "Non", "lastName": "Admin", "employeeNumber": "180999", "status": "active"}],
+        details={
+            "u-nonadmin": {
+                "profile": {
+                    "emailAddress": "nonadmin@example.com",
+                    "emailStatus": "verified",
+                    "suiteNumber": "1800",
+                }
+            }
+        },
+    )
+    with session_factory() as session:
+        job, summary = await run_unifi_reconciliation(session, client=client)
+        session.commit()
+
+        snapshot = session.scalar(select(UnifiUser).where(UnifiUser.unifi_user_id == "u-nonadmin"))
+
+    assert client.detail_calls == ["u-nonadmin"]
+    assert client.write_calls == 0
+    assert snapshot.email == "nonadmin@example.com"
+    assert snapshot.email_status == "verified"
+    assert snapshot.suite_number == "1800"
+    assert summary.email_key_counts == {"profile.emailAddress": 1}
+    assert job.result_json["email_key_counts"] == {"profile.emailAddress": 1}
 
 
 @pytest.mark.anyio

@@ -45,6 +45,7 @@ Implemented:
 - CLI entry point: `python scripts/run_reconcile.py`.
 - Local-only bootstrap CSV and reference ZIP workflow to promote unlinked UniFi snapshots, update linked local users, and store desired UniFi Access Policy/User Group choices.
 - Exporter-compatible UniFi snapshot normalization, including non-admin email fallbacks, suite number derivation, policy/group names, NFC counts, Touch Pass status/activity, and license plate counts.
+- Reconciliation enriches `/users` list results with read-only per-user detail payloads before storing snapshots, which is required when UniFi omits non-admin email fields from the list response.
 
 Not implemented in Phase 2:
 
@@ -102,6 +103,8 @@ CSV import:
 UniFi Access does not use the app's internal `AccessProfile` field. Access Profiles remain available as optional local templates for other workflows, but the bootstrap master sheet uses the user-facing Company, Suite, UniFi Access Policy, and UniFi User Group terms.
 
 Suite number normalization prefers explicit UniFi fields `suite_number`, `suiteNumber`, or `suite`. If none is present, the app falls back to the first three digits found in `employee_number`, matching the older exporter behavior used by the current building workflow.
+
+After deploying normalization changes, rerun UniFi reconciliation before exporting bootstrap CSVs. Existing snapshot rows keep their previous normalized values until reconciliation refreshes them from UniFi.
 
 ## Required Environment Variables
 

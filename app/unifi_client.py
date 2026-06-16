@@ -80,9 +80,13 @@ class UniFiAccessClient:
         if not self.settings.unifi_access_token:
             return None
         payload = await self._get_json(f"/api/v1/developer/users/{unifi_user_id}")
-        if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
-            return payload["data"]
-        return payload if isinstance(payload, dict) else None
+        if not isinstance(payload, dict):
+            return None
+        for key in ("data", "user", "result", "item"):
+            value = payload.get(key)
+            if isinstance(value, dict):
+                return value
+        return payload
 
     async def list_access_policies(self) -> list[dict[str, Any]]:
         return await self._list_paginated("/api/v1/developer/access_policies")
