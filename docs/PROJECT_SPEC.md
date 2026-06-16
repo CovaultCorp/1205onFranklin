@@ -616,7 +616,9 @@ Rules:
 * Bootstrap must not call UniFi write APIs.
 * Only unmatched `UnifiUser` snapshots are exported.
 * CSV import promotes only rows explicitly marked with `promote=yes`.
-* CSV import must resolve company, suite, and access profile to existing local records.
+* Reference export must provide companies, suites, local access profiles, UniFi access policies, UniFi user groups, and unmatched UniFi users in a ZIP.
+* CSV import must resolve company, suite, and access profile to existing local records by ID or by name/number.
+* CSV import must reject a row when name/number lookup is missing or ambiguous.
 * CSV import must not create duplicate users; existing users are matched by employee number, then email.
 * CSV import links the `UnifiUser` snapshot to the created or existing local `User`.
 * CSV import creates a primary `UserSuiteAssignment`.
@@ -625,7 +627,8 @@ Rules:
 Required bootstrap routes:
 
 * GET /admin/bootstrap
-* GET /admin/bootstrap/export
+* GET /admin/bootstrap/reference-export
+* GET /admin/bootstrap/export redirects to `/admin/bootstrap/reference-export`
 * POST /admin/bootstrap/import
 
 ## Admin dashboard
@@ -689,6 +692,7 @@ Admin:
 * GET /admin/sync-jobs
 * POST /admin/reconcile/run
 * GET /admin/bootstrap
+* GET /admin/bootstrap/reference-export
 * GET /admin/bootstrap/export
 * POST /admin/bootstrap/import
 

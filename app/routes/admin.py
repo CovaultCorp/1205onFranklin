@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.audit import audit
 from app.db import get_session
-from app.import_export import export_unmatched_unifi_users_csv, import_bootstrap_users_csv
+from app.import_export import build_bootstrap_reference_zip, import_bootstrap_users_csv
 from app.models import (
     AccessProfile,
     AccessRequest,
@@ -27,6 +27,7 @@ from app.models import (
 )
 from app.reconcile import run_unifi_reconciliation
 from app.security import require_admin
+from app.unifi_client import UniFiAccessClient
 
 router = APIRouter(prefix="/admin")
 templates = Jinja2Templates(directory="app/templates")
@@ -361,15 +362,28 @@ def bootstrap_users(
 
 
 @router.get("/bootstrap/export")
-def export_bootstrap_users(
+def export_bootstrap_users_compat(
     session: Session = Depends(get_session),
     account: PortalAccount = Depends(require_admin),
 ):
-    csv_text = export_unmatched_unifi_users_csv(session)
+    return RedirectResponse("/admin/bootstrap/reference-export", status_code=303)
+
+
+@router.get("/bootstrap/reference-export")
+async def export_bootstrap_reference(
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(require_admin),
+):
+    unifi_client = UniFiAccessClient()
+    archive = build_bootstrap_reference_zip(
+        session,
+        unifi_access_policies=await unifi_client.list_access_policies(),
+        unifi_user_groups=await unifi_client.list_user_groups(),
+    )
     return Response(
-        csv_text,
-        media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="unifi_bootstrap_users.csv"'},
+        archive,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="bootstrap_reference_export.zip"'},
     )
 
 

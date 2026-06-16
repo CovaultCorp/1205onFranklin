@@ -43,7 +43,7 @@ class FakeUniFiClient:
         raise AssertionError("reconciliation must not call write methods")
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_unifi_read_methods_paginate_and_fetch_resources(monkeypatch):
     monkeypatch.setenv("UNIFI_ACCESS_TOKEN", "test-token")
     monkeypatch.setenv("UNIFI_ACCESS_BASE_URL", "https://unifi.test")
@@ -84,7 +84,7 @@ async def test_unifi_read_methods_paginate_and_fetch_resources(monkeypatch):
     assert any(url.endswith("/api/v1/developer/access_policies?page_num=1&page_size=2") for url in requested_urls)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_reconciliation_matches_by_mapping_employee_then_email(db_context):
     session_factory, _ = db_context
     from app.models import Company, Suite, UnifiUser, User
@@ -124,7 +124,7 @@ async def test_reconciliation_matches_by_mapping_employee_then_email(db_context)
         assert job.proposed_actions["dry_run"] is True
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_reconciliation_detects_conflicts_idempotently_and_creates_dry_run_job(db_context):
     session_factory, _ = db_context
     from app.models import AccessProfile, Company, Conflict, Suite, SyncJob, UnifiUser, User
@@ -186,7 +186,7 @@ async def test_reconciliation_detects_conflicts_idempotently_and_creates_dry_run
         assert second_job.result_json["conflicts_created"] == 0
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_reconciliation_does_not_call_write_methods(db_context):
     session_factory, _ = db_context
     from app.models import Company, Suite, User
@@ -208,7 +208,7 @@ async def test_reconciliation_does_not_call_write_methods(db_context):
     assert fake_client.write_calls == 0
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_unifi_write_guard_still_blocks_writes(monkeypatch):
     monkeypatch.setenv("ENABLE_WRITES", "false")
     import app.config

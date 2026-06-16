@@ -2,8 +2,8 @@
 {% block content %}
 <section class="panel">
   <h1>Bootstrap Users From UniFi</h1>
-  <p>Export unmatched UniFi snapshots, assign company, suite, and access profile in the CSV, then upload it to create or link local users. This workflow updates the local registry only.</p>
-  <p><a class="button" href="/admin/bootstrap/export">Download assignment CSV</a></p>
+  <p>Download reference data, complete unmatched_unifi_users.csv, then upload it to create or link local users. This workflow updates the local registry only.</p>
+  <p><a class="button" href="/admin/bootstrap/reference-export">Download Reference ZIP</a></p>
 
   <form method="post" action="/admin/bootstrap/import" enctype="multipart/form-data" class="grid-form">
     <label class="wide">Completed CSV <input type="file" name="file" accept=".csv,text/csv" required></label>

@@ -41,9 +41,9 @@ Implemented:
 - Conflict detection for unmatched active users, missing company/suite assignments, status mismatch, name/email mismatch, access policy mismatch, duplicate UniFi email/employee number, inactive company, and inactive suite.
 - Idempotent open-conflict creation on repeated reconciliation runs.
 - Dry-run `SyncJob(job_type="reconcile")` records containing proposed actions only.
-- Admin “Run UniFi Reconciliation” action, reconciliation summary, improved conflict view, and improved sync job view.
+- Admin "Run UniFi Reconciliation" action, reconciliation summary, improved conflict view, and improved sync job view.
 - CLI entry point: `python scripts/run_reconcile.py`.
-- Local-only bootstrap workflow to promote unmatched UniFi snapshots into local `User` records through CSV assignment import.
+- Local-only bootstrap reference ZIP and CSV import workflow to promote unmatched UniFi snapshots into local `User` records.
 
 Not implemented in Phase 2:
 
@@ -62,15 +62,32 @@ After running read-only reconciliation, go to:
 
 Workflow:
 
-1. Download `unifi_bootstrap_users.csv`.
-2. Fill in `promote=yes` for rows to import.
-3. Assign each promoted row to existing local company, suite, and access profile records using either IDs or names.
-4. Upload the completed CSV.
+1. Download the reference ZIP.
+2. Use `companies.csv`, `suites.csv`, `access_profiles.csv`, `unifi_access_policies.csv`, and `unifi_user_groups.csv` as lookup references.
+3. Complete `unmatched_unifi_users.csv`.
+4. Fill in `promote=yes` for rows to import.
+5. Assign each promoted row to existing local company, suite, and access profile records using either IDs or names.
+6. Upload the completed `unmatched_unifi_users.csv`.
+
+The reference ZIP contains:
+
+```text
+companies.csv
+suites.csv
+access_profiles.csv
+unifi_access_policies.csv
+unifi_user_groups.csv
+unmatched_unifi_users.csv
+```
 
 CSV import:
 
 - Creates local `User` records only when no matching user exists.
 - Matches existing local users by employee number, then email to avoid duplicates.
+- Resolves `company_id` or `company_name`.
+- Resolves `suite_id` or `suite_number`.
+- Resolves `access_profile_id` or `access_profile_name`.
+- Rejects rows with missing or ambiguous name lookups.
 - Sets `company_id`, `primary_suite_id`, and `access_profile_id`.
 - Creates a primary `UserSuiteAssignment`.
 - Links the `UnifiUser` snapshot to the local user.
@@ -178,6 +195,15 @@ Expected export bind mount:
 ```
 
 Supply environment variables in Portainer stack settings. Keep `ENABLE_WRITES=false` unless a future phase explicitly implements and approves UniFi write behavior.
+
+After pulling a new version, redeploy the stack and run database migrations before using new schema fields:
+
+```powershell
+docker compose run --rm web alembic upgrade head
+docker compose up -d --build
+```
+
+In Portainer, use the equivalent stack redeploy flow, then run `alembic upgrade head` in the `web` service or an attached one-off console.
 
 ## Safety Warnings
 

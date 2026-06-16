@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import importlib
 from pathlib import Path
+import zipfile
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,6 +19,7 @@ def app_context(tmp_path, monkeypatch):
     monkeypatch.setenv("APP_SECRET_KEY", "test-secret")
     monkeypatch.setenv("ENABLE_EMAIL", "false")
     monkeypatch.setenv("ENABLE_WRITES", "false")
+    monkeypatch.setenv("UNIFI_ACCESS_TOKEN", "")
 
     import app.config
     import app.db
@@ -182,15 +185,21 @@ def test_admin_bootstrap_export_and_import(app_context):
         suite_id = suite.id
         profile_id = profile.id
 
-    response = client.get("/admin/bootstrap/export")
+    response = client.get("/admin/bootstrap/export", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin/bootstrap/reference-export"
+
+    response = client.get("/admin/bootstrap/reference-export")
     assert response.status_code == 200
-    assert "unifi_bootstrap_users.csv" in response.headers["content-disposition"]
-    csv_text = response.text.replace("promote,u-1", "yes,u-1").replace(",,,\r\n", f",{company_id},,{suite_id},,{profile_id},,,,,\r\n")
-    if f",{company_id},,{suite_id},,{profile_id}," not in csv_text:
-        csv_text = (
-            "promote,unifi_user_id,email,employee_number,first_name,last_name,unifi_status,local_status,company_id,company_name,suite_id,suite_number,access_profile_id,access_profile_name,title,department,phone,notes\n"
-            f"yes,u-1,ada@example.com,E100,Ada,Lovelace,active,active,{company_id},,{suite_id},,{profile_id},,,,,\n"
-        )
+    assert response.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        assert "unmatched_unifi_users.csv" in archive.namelist()
+        assert "companies.csv" in archive.namelist()
+
+    csv_text = (
+        "unifi_user_id,first_name,last_name,full_name,email,employee_number,unifi_status,current_unifi_access_policy_ids,current_unifi_access_policy_names,current_unifi_user_group_ids,current_unifi_user_group_names,promote,company_id,company_name,suite_id,suite_number,access_profile_id,access_profile_name,notes\n"
+        f"u-1,Ada,Lovelace,Ada Lovelace,ada@example.com,E100,active,,,,,yes,{company_id},,{suite_id},,{profile_id},,Imported from bootstrap\n"
+    )
 
     response = client.post(
         "/admin/bootstrap/import",
@@ -209,7 +218,7 @@ def test_admin_bootstrap_export_and_import(app_context):
         assert snapshot.local_user_id == user.id
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_unifi_write_guard_blocks_phase1_writes(monkeypatch):
     monkeypatch.setenv("ENABLE_WRITES", "false")
     import app.config
