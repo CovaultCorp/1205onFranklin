@@ -276,6 +276,112 @@ def test_admin_bootstrap_export_and_import(app_context):
         assert snapshot.local_user_id == user.id
 
 
+def test_admin_user_detail_displays_and_updates_fields(app_context):
+    client, session_factory, _ = app_context
+    create_admin_and_login(client)
+
+    with session_factory() as session:
+        from app.models import Company, Suite, UnifiUser, User
+
+        company = Company(name="Acme")
+        suite = Suite(suite_number="1200")
+        session.add_all([company, suite])
+        session.flush()
+        user = User(
+            first_name="Ada",
+            last_name="Lovelace",
+            email="ada@example.com",
+            employee_number="E100",
+            company_id=company.id,
+            primary_suite_id=suite.id,
+            status="active",
+        )
+        session.add(user)
+        session.flush()
+        session.add(
+            UnifiUser(
+                local_user_id=user.id,
+                unifi_user_id="u-1",
+                email="ada@example.com",
+                group_ids=["group-1"],
+                group_names=["Employees"],
+            )
+        )
+        session.commit()
+        user_id = user.id
+        company_id = company.id
+        suite_id = suite.id
+
+    response = client.get(f"/admin/users/{user_id}")
+    assert response.status_code == 200
+    assert "Current UniFi User Group Names" in response.text
+    assert "Employees" in response.text
+
+    response = client.post(
+        f"/admin/users/{user_id}/update",
+        data={
+            "first_name": "Ada",
+            "last_name": "Byron",
+            "email": "ada@example.com",
+            "employee_number": "E100",
+            "company_id": str(company_id),
+            "primary_suite_id": str(suite_id),
+            "access_profile_id": "",
+            "title": "Engineer",
+            "phone": "555-0100",
+            "department": "Math",
+            "status": "active",
+            "desired_unifi_access_policy_ids": "policy-1",
+            "desired_unifi_access_policy_names": "Front Door",
+            "desired_unifi_user_group_ids": "group-2",
+            "desired_unifi_user_group_names": "Managers",
+            "notes": "Updated locally",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    response = client.post(
+        f"/admin/users/{user_id}/unifi-snapshot/update",
+        data={
+            "email": "ada@example.com",
+            "email_status": "verified",
+            "employee_number": "E100",
+            "suite_number": "1200",
+            "first_name": "Ada",
+            "last_name": "Byron",
+            "full_name": "Ada Byron",
+            "phone": "555-0100",
+            "username": "abyron",
+            "alias": "Ada",
+            "status": "active",
+            "onboard_time": "2026-01-01T00:00:00Z",
+            "access_policy_ids": "policy-1",
+            "access_policy_names": "Front Door",
+            "group_ids": "group-2",
+            "group_names": "Managers",
+            "nfc_card_count": "1",
+            "touch_pass_status": "enabled",
+            "touch_pass_last_activity": "2026-01-02T00:00:00Z",
+            "license_plate_count": "0",
+            "raw_user_json_file": "raw.json",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    with session_factory() as session:
+        from app.models import UnifiUser, User
+
+        user = session.get(User, user_id)
+        snapshot = session.scalar(select(UnifiUser).where(UnifiUser.local_user_id == user_id))
+
+        assert user.last_name == "Byron"
+        assert user.desired_unifi_user_group_names == ["Managers"]
+        assert snapshot.group_ids == ["group-2"]
+        assert snapshot.group_names == ["Managers"]
+
+
 @pytest.mark.anyio
 async def test_unifi_write_guard_blocks_phase1_writes(monkeypatch):
     monkeypatch.setenv("ENABLE_WRITES", "false")

@@ -3,9 +3,100 @@
 <section class="panel">
   <h1>{{ user.first_name }} {{ user.last_name }}</h1>
   <p>{{ user.email }}</p>
-  <p>Status: {{ user.status }}</p>
-  <p>Company: {{ user.company.name if user.company else "" }}</p>
-  <p>Suite: {{ user.primary_suite.suite_number if user.primary_suite else "" }}</p>
+  <p>Company: {{ user.company.name if user.company else "" }} | Suite: {{ user.primary_suite.suite_number if user.primary_suite else "" }} | Status: {{ user.status }}</p>
+</section>
+
+<section class="panel">
+  <h2>Local Registry Fields</h2>
+  <form method="post" action="/admin/users/{{ user.id }}/update" class="grid-form">
+    <label>ID <input value="{{ user.id }}" disabled></label>
+    <label>First name <input name="first_name" value="{{ user.first_name }}" required></label>
+    <label>Last name <input name="last_name" value="{{ user.last_name }}" required></label>
+    <label>Email <input name="email" value="{{ user.email }}" required></label>
+    <label>Employee number <input name="employee_number" value="{{ user.employee_number or '' }}"></label>
+    <label>Company
+      <select name="company_id">
+        <option value="">Unassigned</option>
+        {% for company in companies %}
+          <option value="{{ company.id }}" {% if user.company_id == company.id %}selected{% endif %}>{{ company.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Suite
+      <select name="primary_suite_id">
+        <option value="">Unassigned</option>
+        {% for suite in suites %}
+          <option value="{{ suite.id }}" {% if user.primary_suite_id == suite.id %}selected{% endif %}>{{ suite.suite_number }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>AccessProfile
+      <select name="access_profile_id">
+        <option value="">None</option>
+        {% for profile in profiles %}
+          <option value="{{ profile.id }}" {% if user.access_profile_id == profile.id %}selected{% endif %}>{{ profile.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Title <input name="title" value="{{ user.title or '' }}"></label>
+    <label>Phone <input name="phone" value="{{ user.phone or '' }}"></label>
+    <label>Department <input name="department" value="{{ user.department or '' }}"></label>
+    <label>Status
+      <select name="status">
+        {% for status in ["active", "inactive", "pending", "offboarded"] %}
+          <option value="{{ status }}" {% if user.status == status %}selected{% endif %}>{{ status }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Desired UniFi Access Policy IDs <input name="desired_unifi_access_policy_ids" value="{{ (user.desired_unifi_access_policy_ids or [])|join(';') }}"></label>
+    <label>Desired UniFi Access Policy Names <input name="desired_unifi_access_policy_names" value="{{ (user.desired_unifi_access_policy_names or [])|join(';') }}"></label>
+    <label>Desired UniFi User Group IDs <input name="desired_unifi_user_group_ids" value="{{ (user.desired_unifi_user_group_ids or [])|join(';') }}"></label>
+    <label>Desired UniFi User Group Names <input name="desired_unifi_user_group_names" value="{{ (user.desired_unifi_user_group_names or [])|join(';') }}"></label>
+    <label>Created at <input value="{{ user.created_at }}" disabled></label>
+    <label>Updated at <input value="{{ user.updated_at }}" disabled></label>
+    <label>Last verified at <input value="{{ user.last_verified_at or '' }}" disabled></label>
+    <label>Last verified by <input value="{{ user.last_verified_by or '' }}" disabled></label>
+    <label class="wide">Notes <textarea name="notes">{{ user.notes or '' }}</textarea></label>
+    <div class="wide actions"><button type="submit">Save Local Registry Fields</button></div>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Linked UniFi Snapshot</h2>
+  {% if unifi_user %}
+    <p>Current fields are the latest local snapshot of UniFi Access data. Editing these values changes the local snapshot only and does not call UniFi write APIs.</p>
+    <form method="post" action="/admin/users/{{ user.id }}/unifi-snapshot/update" class="grid-form">
+      <label>Snapshot ID <input value="{{ unifi_user.id }}" disabled></label>
+      <label>UniFi user ID <input value="{{ unifi_user.unifi_user_id }}" disabled></label>
+      <label>Email <input name="email" value="{{ unifi_user.email or '' }}"></label>
+      <label>Email status <input name="email_status" value="{{ unifi_user.email_status or '' }}"></label>
+      <label>Employee number <input name="employee_number" value="{{ unifi_user.employee_number or '' }}"></label>
+      <label>Suite number <input name="suite_number" value="{{ unifi_user.suite_number or '' }}"></label>
+      <label>First name <input name="first_name" value="{{ unifi_user.first_name or '' }}"></label>
+      <label>Last name <input name="last_name" value="{{ unifi_user.last_name or '' }}"></label>
+      <label>Full name <input name="full_name" value="{{ unifi_user.full_name or '' }}"></label>
+      <label>Phone <input name="phone" value="{{ unifi_user.phone or '' }}"></label>
+      <label>Username <input name="username" value="{{ unifi_user.username or '' }}"></label>
+      <label>Alias <input name="alias" value="{{ unifi_user.alias or '' }}"></label>
+      <label>Status <input name="status" value="{{ unifi_user.status or '' }}"></label>
+      <label>Onboard time <input name="onboard_time" value="{{ unifi_user.onboard_time or '' }}"></label>
+      <label>Current UniFi Access Policy IDs <input name="access_policy_ids" value="{{ (unifi_user.access_policy_ids or [])|join(';') }}"></label>
+      <label>Current UniFi Access Policy Names <input name="access_policy_names" value="{{ (unifi_user.access_policy_names or [])|join(';') }}"></label>
+      <label>Current UniFi User Group IDs <input name="group_ids" value="{{ (unifi_user.group_ids or [])|join(';') }}"></label>
+      <label>Current UniFi User Group Names <input name="group_names" value="{{ (unifi_user.group_names or [])|join(';') }}"></label>
+      <label>NFC card count <input name="nfc_card_count" type="number" min="0" value="{{ unifi_user.nfc_card_count if unifi_user.nfc_card_count is not none else '' }}"></label>
+      <label>Touch Pass status <input name="touch_pass_status" value="{{ unifi_user.touch_pass_status or '' }}"></label>
+      <label>Touch Pass last activity <input name="touch_pass_last_activity" value="{{ unifi_user.touch_pass_last_activity or '' }}"></label>
+      <label>License plate count <input name="license_plate_count" type="number" min="0" value="{{ unifi_user.license_plate_count if unifi_user.license_plate_count is not none else '' }}"></label>
+      <label>Raw user JSON file <input name="raw_user_json_file" value="{{ unifi_user.raw_user_json_file or '' }}"></label>
+      <label>Last seen at <input value="{{ unifi_user.last_seen_at or '' }}" disabled></label>
+      <label>Last synced at <input value="{{ unifi_user.last_synced_at or '' }}" disabled></label>
+      <label>Created at <input value="{{ unifi_user.created_at }}" disabled></label>
+      <label>Updated at <input value="{{ unifi_user.updated_at }}" disabled></label>
+      <div class="wide actions"><button type="submit">Save Local Snapshot Fields</button></div>
+    </form>
+  {% else %}
+    <p>No linked UniFi snapshot.</p>
+  {% endif %}
 </section>
 {% endblock %}
-

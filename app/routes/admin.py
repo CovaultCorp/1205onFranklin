@@ -23,6 +23,7 @@ from app.models import (
     SyncJob,
     UnifiUser,
     User,
+    UserSuiteAssignment,
     utcnow,
 )
 from app.reconcile import run_unifi_reconciliation
@@ -35,6 +36,17 @@ templates = Jinja2Templates(directory="app/templates")
 
 def _csv_ids(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _list_values(value: str) -> list[str]:
+    normalized = value.replace("\n", ";").replace(",", ";")
+    return [item.strip() for item in normalized.split(";") if item.strip()]
+
+
+def _optional_int(value: str | int | None) -> int | None:
+    if value in (None, ""):
+        return None
+    return int(value)
 
 
 def _date_or_none(value: str | None) -> date | None:
@@ -202,7 +214,193 @@ def users(request: Request, session: Session = Depends(get_session), account: Po
 
 @router.get("/users/{user_id}", response_class=HTMLResponse)
 def user_detail(request: Request, user_id: int, session: Session = Depends(get_session), account: PortalAccount = Depends(require_admin)):
-    return templates.TemplateResponse(request, "admin/user_detail.html", {"account": account, "user": session.get(User, user_id)})
+    user = session.get(User, user_id)
+    unifi_user = session.scalar(select(UnifiUser).where(UnifiUser.local_user_id == user_id))
+    return templates.TemplateResponse(
+        request,
+        "admin/user_detail.html",
+        {
+            "account": account,
+            "user": user,
+            "unifi_user": unifi_user,
+            "companies": session.scalars(select(Company).order_by(Company.name)).all(),
+            "suites": session.scalars(select(Suite).order_by(Suite.suite_number)).all(),
+            "profiles": session.scalars(select(AccessProfile).order_by(AccessProfile.name)).all(),
+        },
+    )
+
+
+@router.post("/users/{user_id}/update")
+def update_user_detail(
+    request: Request,
+    user_id: int,
+    first_name: str = Form(...),
+    last_name: str = Form(...),
+    email: str = Form(...),
+    employee_number: str = Form(""),
+    company_id: str = Form(""),
+    primary_suite_id: str = Form(""),
+    access_profile_id: str = Form(""),
+    title: str = Form(""),
+    phone: str = Form(""),
+    department: str = Form(""),
+    status: str = Form("pending"),
+    desired_unifi_access_policy_ids: str = Form(""),
+    desired_unifi_access_policy_names: str = Form(""),
+    desired_unifi_user_group_ids: str = Form(""),
+    desired_unifi_user_group_names: str = Form(""),
+    notes: str = Form(""),
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(require_admin),
+):
+    user = session.get(User, user_id)
+    if user is None:
+        return RedirectResponse("/admin/users", status_code=303)
+    before = {
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "email": user.email,
+        "employee_number": user.employee_number,
+        "company_id": user.company_id,
+        "primary_suite_id": user.primary_suite_id,
+        "access_profile_id": user.access_profile_id,
+        "status": user.status,
+        "desired_unifi_access_policy_ids": user.desired_unifi_access_policy_ids or [],
+        "desired_unifi_user_group_ids": user.desired_unifi_user_group_ids or [],
+    }
+    user.first_name = first_name
+    user.last_name = last_name
+    user.email = email.strip().lower()
+    user.employee_number = employee_number.strip() or None
+    user.company_id = _optional_int(company_id)
+    user.primary_suite_id = _optional_int(primary_suite_id)
+    user.access_profile_id = _optional_int(access_profile_id)
+    user.title = title.strip() or None
+    user.phone = phone.strip() or None
+    user.department = department.strip() or None
+    user.status = status
+    user.desired_unifi_access_policy_ids = _list_values(desired_unifi_access_policy_ids)
+    user.desired_unifi_access_policy_names = _list_values(desired_unifi_access_policy_names)
+    user.desired_unifi_user_group_ids = _list_values(desired_unifi_user_group_ids)
+    user.desired_unifi_user_group_names = _list_values(desired_unifi_user_group_names)
+    user.notes = notes.strip() or None
+    if user.primary_suite_id:
+        existing = session.scalar(
+            select(UserSuiteAssignment).where(
+                UserSuiteAssignment.user_id == user.id,
+                UserSuiteAssignment.suite_id == user.primary_suite_id,
+                UserSuiteAssignment.assignment_type == "primary",
+                UserSuiteAssignment.active.is_(True),
+            )
+        )
+        if existing:
+            existing.company_id = user.company_id
+        else:
+            session.add(
+                UserSuiteAssignment(
+                    user_id=user.id,
+                    suite_id=user.primary_suite_id,
+                    company_id=user.company_id,
+                    assignment_type="primary",
+                    active=True,
+                )
+            )
+    audit(
+        session,
+        action="user.updated",
+        target_type="User",
+        target_id=user.id,
+        actor=account,
+        request=request,
+        before=before,
+        after={
+            "email": user.email,
+            "company_id": user.company_id,
+            "primary_suite_id": user.primary_suite_id,
+            "status": user.status,
+            "desired_unifi_access_policy_ids": user.desired_unifi_access_policy_ids or [],
+            "desired_unifi_user_group_ids": user.desired_unifi_user_group_ids or [],
+        },
+    )
+    session.commit()
+    return RedirectResponse(f"/admin/users/{user.id}", status_code=303)
+
+
+@router.post("/users/{user_id}/unifi-snapshot/update")
+def update_user_unifi_snapshot(
+    request: Request,
+    user_id: int,
+    email: str = Form(""),
+    email_status: str = Form(""),
+    employee_number: str = Form(""),
+    suite_number: str = Form(""),
+    first_name: str = Form(""),
+    last_name: str = Form(""),
+    full_name: str = Form(""),
+    phone: str = Form(""),
+    username: str = Form(""),
+    alias: str = Form(""),
+    status: str = Form(""),
+    onboard_time: str = Form(""),
+    access_policy_ids: str = Form(""),
+    access_policy_names: str = Form(""),
+    group_ids: str = Form(""),
+    group_names: str = Form(""),
+    nfc_card_count: str = Form(""),
+    touch_pass_status: str = Form(""),
+    touch_pass_last_activity: str = Form(""),
+    license_plate_count: str = Form(""),
+    raw_user_json_file: str = Form(""),
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(require_admin),
+):
+    unifi_user = session.scalar(select(UnifiUser).where(UnifiUser.local_user_id == user_id))
+    if unifi_user is None:
+        return RedirectResponse(f"/admin/users/{user_id}", status_code=303)
+    before = {
+        "email": unifi_user.email,
+        "group_ids": unifi_user.group_ids or [],
+        "group_names": unifi_user.group_names or [],
+        "access_policy_ids": unifi_user.access_policy_ids or [],
+    }
+    unifi_user.email = email.strip().lower() or None
+    unifi_user.email_status = email_status.strip() or None
+    unifi_user.employee_number = employee_number.strip() or None
+    unifi_user.suite_number = suite_number.strip() or None
+    unifi_user.first_name = first_name.strip() or None
+    unifi_user.last_name = last_name.strip() or None
+    unifi_user.full_name = full_name.strip() or None
+    unifi_user.phone = phone.strip() or None
+    unifi_user.username = username.strip() or None
+    unifi_user.alias = alias.strip() or None
+    unifi_user.status = status.strip().lower() or None
+    unifi_user.onboard_time = onboard_time.strip() or None
+    unifi_user.access_policy_ids = _list_values(access_policy_ids)
+    unifi_user.access_policy_names = _list_values(access_policy_names)
+    unifi_user.group_ids = _list_values(group_ids)
+    unifi_user.group_names = _list_values(group_names)
+    unifi_user.nfc_card_count = _optional_int(nfc_card_count)
+    unifi_user.touch_pass_status = touch_pass_status.strip() or None
+    unifi_user.touch_pass_last_activity = touch_pass_last_activity.strip() or None
+    unifi_user.license_plate_count = _optional_int(license_plate_count)
+    unifi_user.raw_user_json_file = raw_user_json_file.strip() or None
+    audit(
+        session,
+        action="unifi_snapshot.updated_locally",
+        target_type="UnifiUser",
+        target_id=unifi_user.id,
+        actor=account,
+        request=request,
+        before=before,
+        after={
+            "email": unifi_user.email,
+            "group_ids": unifi_user.group_ids or [],
+            "group_names": unifi_user.group_names or [],
+            "access_policy_ids": unifi_user.access_policy_ids or [],
+        },
+    )
+    session.commit()
+    return RedirectResponse(f"/admin/users/{user_id}", status_code=303)
 
 
 @router.get("/companies", response_class=HTMLResponse)

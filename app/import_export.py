@@ -161,6 +161,7 @@ def import_bootstrap_users_csv(
         if snapshot is None:
             summary.errors.append(f"Row {row_number}: UniFi snapshot {unifi_user_id} was not found.")
             continue
+        _apply_snapshot_current_fields(snapshot, row, policy_refs=policy_refs, group_refs=group_refs)
 
         linked_user = session.get(User, snapshot.local_user_id) if snapshot.local_user_id else None
         if linked_user and not update_existing:
@@ -387,6 +388,66 @@ def _apply_registry_fields(
         user.desired_unifi_user_group_names = desired_group_names
     user.status = _norm(row.get("user_status")) or user.status or _local_status_from_unifi(snapshot.status)
     user.notes = _norm(row.get("notes")) or user.notes
+
+
+def _apply_snapshot_current_fields(
+    snapshot: UnifiUser,
+    row: dict[str, str],
+    *,
+    policy_refs: list[dict[str, Any]],
+    group_refs: list[dict[str, Any]],
+) -> None:
+    policy_ids = _split_multi_value(row.get("access_policy_ids"))
+    policy_names = _split_multi_value(row.get("access_policy_names"))
+    group_ids = _split_multi_value(row.get("group_ids"))
+    group_names = _split_multi_value(row.get("group_names"))
+    policy_names_by_id = _names_by_id(policy_refs)
+    group_names_by_id = _names_by_id(group_refs)
+
+    if policy_ids:
+        snapshot.access_policy_ids = policy_ids
+    if policy_names or policy_ids:
+        snapshot.access_policy_names = policy_names or _names_for_ids(policy_ids, policy_names_by_id)
+    if group_ids:
+        snapshot.group_ids = group_ids
+    if group_names or group_ids:
+        snapshot.group_names = group_names or _names_for_ids(group_ids, group_names_by_id)
+
+    for field in (
+        "email_status",
+        "suite_number",
+        "phone",
+        "username",
+        "alias",
+        "onboard_time",
+        "raw_user_json_file",
+    ):
+        value = _norm(row.get(field))
+        if value:
+            setattr(snapshot, field, value)
+    if _norm(row.get("status")):
+        snapshot.status = _norm_lower(row.get("status"))
+    if _norm(row.get("email")):
+        snapshot.email = _norm_lower(row.get("email"))
+    if _norm(row.get("employee_number")):
+        snapshot.employee_number = _norm(row.get("employee_number"))
+    if _norm(row.get("first_name")):
+        snapshot.first_name = _norm(row.get("first_name"))
+    if _norm(row.get("last_name")):
+        snapshot.last_name = _norm(row.get("last_name"))
+    if _norm(row.get("full_name")):
+        snapshot.full_name = _norm(row.get("full_name"))
+    for field in ("nfc_card_count", "license_plate_count"):
+        value = _norm(row.get(field))
+        if value:
+            try:
+                setattr(snapshot, field, int(value))
+            except ValueError:
+                pass
+    if _norm(row.get("touch_pass_status")):
+        snapshot.touch_pass_status = _norm(row.get("touch_pass_status"))
+    if _norm(row.get("touch_pass_last_activity")):
+        snapshot.touch_pass_last_activity = _norm(row.get("touch_pass_last_activity"))
 
 
 def _resolve_reference(

@@ -215,6 +215,44 @@ def test_import_promotes_unlinked_snapshot_by_id_with_assignments_and_audit(db_c
         assert audit.actor_email == "admin@example.com"
 
 
+def test_import_updates_current_unifi_groups_from_bootstrap_group_columns(db_context):
+    from app.import_export import import_bootstrap_users_csv
+    from app.models import Company, Suite, UnifiUser
+
+    with db_context() as session:
+        company = Company(name="Acme")
+        suite = Suite(suite_number="1200")
+        snapshot = UnifiUser(unifi_user_id="u-1", email="ada@example.com")
+        session.add_all([company, suite, snapshot])
+        session.commit()
+
+        summary = import_bootstrap_users_csv(
+            session,
+            _csv_text(
+                [
+                    {
+                        "promote": "yes",
+                        "id": "u-1",
+                        "first_name": "Ada",
+                        "last_name": "Lovelace",
+                        "email": "ada@example.com",
+                        "company_id": str(company.id),
+                        "local_suite_id": str(suite.id),
+                        "group_ids": "group-1;group-2",
+                        "group_names": "Employees;Managers",
+                    }
+                ]
+            ),
+        )
+        session.commit()
+
+        snapshot = session.scalar(select(UnifiUser).where(UnifiUser.unifi_user_id == "u-1"))
+
+        assert summary.errors == []
+        assert snapshot.group_ids == ["group-1", "group-2"]
+        assert snapshot.group_names == ["Employees", "Managers"]
+
+
 def test_import_promotes_by_name_lookup(db_context):
     from app.import_export import import_bootstrap_users_csv
     from app.models import Company, Suite, UnifiUser, User
