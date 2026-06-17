@@ -229,6 +229,31 @@ async def test_reconciliation_does_not_call_write_methods(db_context):
 
 
 @pytest.mark.anyio
+async def test_reconciliation_creates_review_batch_for_unmatched_unifi_users(db_context):
+    session_factory, _ = db_context
+    from app.models import ImportBatch, ImportBatchRow
+    from app.reconcile import run_unifi_reconciliation
+
+    with session_factory() as session:
+        job, _summary = await run_unifi_reconciliation(
+            session,
+            client=FakeUniFiClient(
+                [{"id": "u-unmatched", "email": "new@example.com", "employeeNumber": "N1", "firstName": "New", "lastName": "Person", "status": "active"}]
+            ),
+        )
+        session.commit()
+
+        batch = session.scalar(select(ImportBatch).where(ImportBatch.source == "unifi_reconciliation"))
+        row = session.scalar(select(ImportBatchRow).where(ImportBatchRow.import_batch_id == batch.id))
+
+    assert job.result_json["import_batch_id"] == batch.id
+    assert batch.status == "preview"
+    assert row.email == "new@example.com"
+    assert row.action == "error"
+    assert row.validation_errors_json
+
+
+@pytest.mark.anyio
 async def test_reconciliation_stores_exporter_compatible_normalized_fields(db_context):
     session_factory, _ = db_context
     from app.models import UnifiUser

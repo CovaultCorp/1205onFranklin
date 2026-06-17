@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="page-title-row">
+    <div>
+      <h1>Import Batch #{{ batch.id }}</h1>
+      <p>{{ batch.source }} - {{ batch.created_at }} - <span class="badge badge-muted">{{ batch.status }}</span></p>
+    </div>
+    <div class="actions">
+      {% if batch.status == "preview" %}
+        <form method="post" action="/admin/import-batches/{{ batch.id }}/commit">
+          <button class="btn btn-primary" type="submit" {% if has_errors %}disabled{% endif %}>Commit</button>
+        </form>
+        <form method="post" action="/admin/import-batches/{{ batch.id }}/cancel">
+          <button class="btn btn-danger" type="submit">Cancel</button>
+        </form>
+      {% endif %}
+      <a class="btn btn-secondary" href="/admin/bootstrap">Back to Bootstrap</a>
+    </div>
+  </div>
+  {% if batch.last_error %}
+    <div class="alert alert-danger">{{ batch.last_error }}</div>
+  {% endif %}
+  {% if has_errors and batch.status == "preview" %}
+    <div class="alert alert-warning">Resolve validation errors before committing this batch.</div>
+  {% endif %}
+  <div class="stats">
+    <div class="stat"><strong>{{ batch.summary_json.total_rows or 0 }}</strong>Total rows</div>
+    <div class="stat"><strong>{{ batch.summary_json.create_count or 0 }}</strong>Creates</div>
+    <div class="stat"><strong>{{ batch.summary_json.update_count or 0 }}</strong>Updates</div>
+    <div class="stat"><strong>{{ batch.summary_json.link_count or 0 }}</strong>Links</div>
+    <div class="stat"><strong>{{ batch.summary_json.skip_count or 0 }}</strong>Skips</div>
+    <div class="stat"><strong>{{ batch.summary_json.error_count or 0 }}</strong>Errors</div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="tabs">
+    {% for item in ["all", "create", "update", "link", "skip", "error"] %}
+      <a class="tab {% if active_filter == item %}active{% endif %}" href="/admin/import-batches/{{ batch.id }}?action={{ item }}">{{ item|title }}</a>
+    {% endfor %}
+  </div>
+  <table class="table import-table">
+    <tr>
+      <th>Action</th>
+      <th>User</th>
+      <th>Company</th>
+      <th>Suite</th>
+      <th>Current UniFi</th>
+      <th>Desired UniFi</th>
+      <th>Changes</th>
+    </tr>
+    {% for row in rows %}
+      {% set after = row.after_json or {} %}
+      <tr class="{% if row.action == 'error' or row.validation_errors_json %}row-error{% endif %}">
+        <td><span class="badge badge-{{ 'danger' if row.action == 'error' else 'success' if row.action == 'create' else 'warning' if row.action in ['update', 'link'] else 'muted' }}">{{ row.action|title }}</span></td>
+        <td>
+          <strong>{{ row.full_name or after.full_name or "" }}</strong><br>
+          {{ row.email or after.email or "" }}<br>
+          <span class="subtle">{{ row.employee_number or after.employee_number or "" }}</span><br>
+          <span class="subtle">{{ row.unifi_user_id or after.unifi_user_id or "" }}</span>
+          {% if row.validation_errors_json %}
+            <ul class="error-list">{% for error in row.validation_errors_json %}<li>{{ error }}</li>{% endfor %}</ul>
+          {% endif %}
+        </td>
+        <td class="{% if row.diff_json and row.diff_json.company_name %}field-changed{% endif %}">{{ after.company_name or "" }}</td>
+        <td class="{% if row.diff_json and row.diff_json.suite_number %}field-changed{% endif %}">{{ after.suite_number or "" }}</td>
+        <td>
+          <div><span class="subtle">Policies</span> {{ (after.current_unifi_access_policy_names or [])|join(", ") }}</div>
+          <div><span class="subtle">Groups</span> {{ (after.current_unifi_user_group_names or [])|join(", ") }}</div>
+        </td>
+        <td>
+          <div><span class="subtle">Policies</span> {{ (after.desired_unifi_access_policy_names or [])|join(", ") }}</div>
+          <div><span class="subtle">Groups</span> {{ (after.desired_unifi_user_group_names or [])|join(", ") }}</div>
+        </td>
+        <td>
+          {% if row.diff_json %}
+            {% for field, values in row.diff_json.items() %}
+              <div class="diff-line">
+                <strong>{{ field.replace("_", " ")|title }}</strong>
+                <span class="diff-before">{{ values.before }}</span>
+                <span class="diff-arrow">to</span>
+                <span class="diff-after">{{ values.after }}</span>
+              </div>
+            {% endfor %}
+          {% else %}
+            <span class="subtle">No field changes</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endblock %}

@@ -382,6 +382,47 @@ Fields:
 * ip_address
 * created_at
 
+### ImportBatch
+
+Represents a reviewable import or reconciliation change set.
+
+Fields:
+
+* id
+* source: bootstrap_csv/unifi_reconciliation
+* status: preview/committed/cancelled/failed
+* filename
+* created_by_account_id
+* summary_json
+* created_at
+* committed_at
+* committed_by_account_id
+* last_error
+
+### ImportBatchRow
+
+Represents one proposed row-level local registry action.
+
+Fields:
+
+* id
+* import_batch_id
+* row_number
+* action: create/update/link/skip/error
+* target_type
+* target_id
+* unifi_user_id
+* email
+* employee_number
+* full_name
+* before_json
+* after_json
+* diff_json
+* validation_errors_json
+* status: pending/committed/skipped/error
+* created_at
+* committed_at
+
 ### Conflict
 
 Represents mismatches requiring admin review.
@@ -622,6 +663,9 @@ Reconciliation should:
   3. email
 * Create Conflict records for risky mismatches.
 * Create dry-run SyncJob records with proposed actions.
+* Upsert raw observed `UnifiUser` snapshots automatically.
+* Place proposed local registry actions in an `ImportBatch` for admin review and commit.
+* Never create, update, or link local `User` records automatically during reconciliation.
 
 Detect:
 
@@ -651,6 +695,11 @@ Rules:
 * CSV import promotes unlinked snapshots only when explicitly marked with `promote=yes`.
 * CSV import updates linked local users only when explicitly marked with `update_existing=yes`.
 * CSV import skips rows where both `promote` and `update_existing` are blank.
+* CSV import creates an `ImportBatch` preview first.
+* CSV import must not modify local `User`, `UserSuiteAssignment`, or snapshot link records until an admin commits the import batch.
+* Import batch preview rows show create/update/link/skip/error actions, row-level validation errors, before/after values, and `diff_json` field changes.
+* Import batch commit is admin-only and blocked while any row has validation errors.
+* Import batch cancel leaves local registry records unchanged.
 * Reference export must provide companies, suites, UniFi access policies, UniFi user groups, and all UniFi users in a ZIP.
 * CSV import must resolve company and suite to existing local records by ID or by name/number.
 * CSV import accepts Suite by `local_suite_id`, `local_suite_number`, or the old exporter `suite_number` field.
@@ -670,6 +719,21 @@ Required bootstrap routes:
 * GET /admin/bootstrap/reference-export
 * GET /admin/bootstrap/export
 * POST /admin/bootstrap/import
+* POST /admin/bootstrap/import/preview
+* GET /admin/import-batches/{id}
+* POST /admin/import-batches/{id}/commit
+* POST /admin/import-batches/{id}/cancel
+
+## UI and theme behavior
+
+Rules:
+
+* Admin templates should use reusable card, badge, button, table, alert, and diff classes.
+* Import review screens should highlight changed fields with `.field-changed`, `.diff-before`, and `.diff-after`.
+* The base layout must provide a light/dark theme toggle.
+* Theme preference is stored in browser `localStorage`.
+* First visit respects `prefers-color-scheme`.
+* The theme toggle does not require backend persistence.
 
 ## Admin dashboard
 
@@ -735,6 +799,10 @@ Admin:
 * GET /admin/bootstrap/reference-export
 * GET /admin/bootstrap/export
 * POST /admin/bootstrap/import
+* POST /admin/bootstrap/import/preview
+* GET /admin/import-batches/{id}
+* POST /admin/import-batches/{id}/commit
+* POST /admin/import-batches/{id}/cancel
 
 Reports:
 

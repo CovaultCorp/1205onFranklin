@@ -10,13 +10,15 @@ from sqlalchemy.orm import Session
 
 from app.audit import audit
 from app.db import get_session
-from app.import_export import build_bootstrap_reference_zip, export_all_unifi_users_csv, import_bootstrap_users_csv
+from app.import_export import build_bootstrap_reference_zip, commit_import_batch, create_bootstrap_import_batch, export_all_unifi_users_csv
 from app.models import (
     AccessProfile,
     AccessRequest,
     Company,
     CompanySuite,
     Conflict,
+    ImportBatch,
+    ImportBatchRow,
     PortalAccount,
     ReportRun,
     Suite,
@@ -531,8 +533,11 @@ def sync_jobs(request: Request, session: Session = Depends(get_session), account
 
 @router.post("/reconcile/run")
 async def run_reconcile(session: Session = Depends(get_session), account: PortalAccount = Depends(require_admin)):
-    await run_unifi_reconciliation(session)
+    job, _summary = await run_unifi_reconciliation(session)
     session.commit()
+    import_batch_id = (job.result_json or {}).get("import_batch_id")
+    if import_batch_id:
+        return RedirectResponse(f"/admin/import-batches/{import_batch_id}", status_code=303)
     return RedirectResponse("/admin/sync-jobs", status_code=303)
 
 
@@ -554,7 +559,7 @@ def bootstrap_users(
             "companies": session.scalars(select(Company).order_by(Company.name)).all(),
             "suites": session.scalars(select(Suite).order_by(Suite.suite_number)).all(),
             "profiles": session.scalars(select(AccessProfile).order_by(AccessProfile.name)).all(),
-            "summary": None,
+            "recent_batches": session.scalars(select(ImportBatch).order_by(ImportBatch.created_at.desc()).limit(10)).all(),
         },
     )
 
@@ -595,37 +600,105 @@ async def export_bootstrap_reference(
     )
 
 
-@router.post("/bootstrap/import", response_class=HTMLResponse)
+@router.post("/bootstrap/import")
+async def import_bootstrap_users_compat(
+    request: Request,
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(require_admin),
+):
+    return await preview_bootstrap_users(request, file, session, account)
+
+
+@router.post("/bootstrap/import/preview")
 async def import_bootstrap_users(
     request: Request,
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
     account: PortalAccount = Depends(require_admin),
 ):
+    return await preview_bootstrap_users(request, file, session, account)
+
+
+async def preview_bootstrap_users(
+    request: Request,
+    file: UploadFile,
+    session: Session,
+    account: PortalAccount,
+):
     csv_text = (await file.read()).decode("utf-8-sig")
     unifi_client = UniFiAccessClient()
-    summary = import_bootstrap_users_csv(
+    batch = create_bootstrap_import_batch(
         session,
         csv_text,
         unifi_access_policies=await unifi_client.list_access_policies(),
         unifi_user_groups=await unifi_client.list_user_groups(),
         actor_account_id=account.id,
+        filename=file.filename,
+    )
+    session.commit()
+    return RedirectResponse(f"/admin/import-batches/{batch.id}", status_code=303)
+
+
+@router.get("/import-batches/{batch_id}", response_class=HTMLResponse)
+def import_batch_detail(
+    request: Request,
+    batch_id: int,
+    action: str = "all",
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(require_admin),
+):
+    batch = session.get(ImportBatch, batch_id)
+    if batch is None:
+        return RedirectResponse("/admin/bootstrap", status_code=303)
+    row_query = select(ImportBatchRow).where(ImportBatchRow.import_batch_id == batch.id).order_by(ImportBatchRow.id)
+    if action != "all":
+        row_query = row_query.where(ImportBatchRow.action == action)
+    rows = session.scalars(row_query).all()
+    has_errors = bool(batch.summary_json.get("error_count")) or any(row.validation_errors_json for row in batch.rows)
+    return templates.TemplateResponse(
+        request,
+        "admin/import_batch_detail.html",
+        {
+            "account": account,
+            "batch": batch,
+            "rows": rows,
+            "active_filter": action,
+            "has_errors": has_errors,
+        },
+    )
+
+
+@router.post("/import-batches/{batch_id}/commit")
+def commit_import_batch_route(
+    request: Request,
+    batch_id: int,
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(require_admin),
+):
+    batch = session.get(ImportBatch, batch_id)
+    if batch is None:
+        return RedirectResponse("/admin/bootstrap", status_code=303)
+    commit_import_batch(
+        session,
+        batch,
+        actor_account_id=account.id,
         actor_email=account.email,
         ip_address=request.client.host if request.client else None,
     )
     session.commit()
-    unmatched = session.scalars(
-        select(UnifiUser).where(UnifiUser.local_user_id.is_(None)).order_by(UnifiUser.email, UnifiUser.unifi_user_id)
-    ).all()
-    return templates.TemplateResponse(
-        request,
-        "admin/bootstrap.html",
-        {
-            "account": account,
-            "unmatched": unmatched,
-            "companies": session.scalars(select(Company).order_by(Company.name)).all(),
-            "suites": session.scalars(select(Suite).order_by(Suite.suite_number)).all(),
-            "profiles": session.scalars(select(AccessProfile).order_by(AccessProfile.name)).all(),
-            "summary": summary,
-        },
-    )
+    return RedirectResponse(f"/admin/import-batches/{batch.id}", status_code=303)
+
+
+@router.post("/import-batches/{batch_id}/cancel")
+def cancel_import_batch(
+    batch_id: int,
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(require_admin),
+):
+    batch = session.get(ImportBatch, batch_id)
+    if batch and batch.status == "preview":
+        batch.status = "cancelled"
+        batch.last_error = None
+        session.commit()
+    return RedirectResponse(f"/admin/import-batches/{batch_id}", status_code=303)

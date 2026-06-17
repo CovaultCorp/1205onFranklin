@@ -262,7 +262,22 @@ def test_admin_bootstrap_export_and_import(app_context):
         files={"file": ("bootstrap.csv", csv_text, "text/csv")},
     )
     assert response.status_code == 200
-    assert "Users Created" in response.text
+    assert "Import Batch" in response.text
+    assert "Ada Lovelace" in response.text
+
+    with session_factory() as session:
+        from app.models import ImportBatch, UnifiUser, User
+
+        batch = session.scalar(select(ImportBatch).where(ImportBatch.source == "bootstrap_csv"))
+        user = session.scalar(select(User).where(User.email == "ada@example.com"))
+        assert batch is not None
+        assert batch.status == "preview"
+        assert batch.summary_json["create_count"] == 1
+        assert user is None
+
+    response = client.post(f"/admin/import-batches/{batch.id}/commit", follow_redirects=True)
+    assert response.status_code == 200
+    assert "committed" in response.text
 
     with session_factory() as session:
         from app.models import UnifiUser, User
@@ -274,6 +289,37 @@ def test_admin_bootstrap_export_and_import(app_context):
         assert user.desired_unifi_access_policy_ids == ["policy-1"]
         assert user.desired_unifi_user_group_ids == ["group-1"]
         assert snapshot.local_user_id == user.id
+
+
+def test_import_batch_commit_requires_admin(app_context):
+    client, session_factory, _ = app_context
+    with session_factory() as session:
+        from app.models import ImportBatch
+
+        batch = ImportBatch(source="bootstrap_csv", status="preview", summary_json={})
+        session.add(batch)
+        session.commit()
+        batch_id = batch.id
+
+    response = client.post(f"/admin/import-batches/{batch_id}/commit", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login"
+
+
+def test_base_template_dark_mode_and_css_theme(app_context):
+    client, _session_factory, _ = app_context
+    create_admin_and_login(client)
+
+    response = client.get("/admin")
+    assert response.status_code == 200
+    assert "data-theme=\"light\"" in response.text
+    assert "prefers-color-scheme: dark" in response.text
+    assert "localStorage.setItem(\"theme\"" in response.text
+    css = client.get("/static/styles.css").text
+    assert "html[data-theme=\"dark\"]" in css
+    assert ".field-changed" in css
+    assert ".diff-before" in css
+    assert ".btn-primary" in css
 
 
 def test_admin_user_detail_displays_and_updates_fields(app_context):

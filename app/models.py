@@ -221,6 +221,52 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class ImportBatch(Base):
+    __tablename__ = "import_batches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="preview", index=True)
+    filename: Mapped[str | None] = mapped_column(String(500))
+    created_by_account_id: Mapped[int | None] = mapped_column(ForeignKey("portal_accounts.id"))
+    summary_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    committed_by_account_id: Mapped[int | None] = mapped_column(ForeignKey("portal_accounts.id"))
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+    rows: Mapped[list[ImportBatchRow]] = relationship(
+        "ImportBatchRow",
+        back_populates="batch",
+        cascade="all, delete-orphan",
+        order_by="ImportBatchRow.id",
+    )
+
+
+class ImportBatchRow(Base):
+    __tablename__ = "import_batch_rows"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    import_batch_id: Mapped[int] = mapped_column(ForeignKey("import_batches.id"), index=True)
+    row_number: Mapped[int | None] = mapped_column(Integer)
+    action: Mapped[str] = mapped_column(String(32), index=True)
+    target_type: Mapped[str] = mapped_column(String(120), default="user")
+    target_id: Mapped[str | None] = mapped_column(String(120))
+    unifi_user_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    email: Mapped[str | None] = mapped_column(String(255), index=True)
+    employee_number: Mapped[str | None] = mapped_column(String(120), index=True)
+    full_name: Mapped[str | None] = mapped_column(String(255))
+    before_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    after_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    diff_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    validation_errors_json: Mapped[list[str] | None] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    batch: Mapped[ImportBatch] = relationship("ImportBatch", back_populates="rows")
+
+
 class Conflict(TimestampMixin, Base):
     __tablename__ = "conflicts"
 
