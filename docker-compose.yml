@@ -33,11 +33,24 @@ services:
       REPORT_TIMEZONE: ${REPORT_TIMEZONE:-America/New_York}
       REPORT_DEFAULT_TYPE: ${REPORT_DEFAULT_TYPE:-full_building_access}
     ports:
-      - "8083:8080"
+      - "8080:8080"
     volumes:
       - /mnt/unas/docker-exports/building-access-registry:/app/exports
     depends_on:
       - db
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: building-access-registry-frontend
+    environment:
+      BACKEND_API_URL: ${BACKEND_API_URL:-http://web:8080}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - web
     restart: unless-stopped
 
   worker:

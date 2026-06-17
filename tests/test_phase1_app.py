@@ -118,6 +118,46 @@ def test_access_request_approval_creates_dry_run_sync_job(app_context):
         assert audit is not None
 
 
+def test_json_api_request_login_and_approval_flow(app_context):
+    client, session_factory, _ = app_context
+    create_admin_and_login(client)
+    client.post("/logout", follow_redirects=False)
+
+    response = client.post("/api/session")
+    assert response.status_code == 405
+
+    response = client.post(
+        "/api/access-requests",
+        json={
+            "request_type": "new_access",
+            "requested_for_first_name": "Katherine",
+            "requested_for_last_name": "Johnson",
+            "requested_for_email": "katherine@example.com",
+            "requester_name": "Manager",
+            "requester_email": "manager@example.com",
+        },
+    )
+    assert response.status_code == 201
+    request_id = response.json()["request"]["id"]
+
+    response = client.post("/api/auth/login", json={"email": "admin@example.com", "password": "long-enough-password"})
+    assert response.status_code == 200
+    assert response.json()["account"]["role"] == "admin"
+
+    response = client.post(f"/api/admin/requests/{request_id}/approve", json={})
+    assert response.status_code == 200
+    assert response.json()["request"]["status"] == "pending_sync"
+
+    with session_factory() as session:
+        from app.models import AuditLog, SyncJob
+
+        job = session.scalar(select(SyncJob).where(SyncJob.access_request_id == request_id))
+        audit_log = session.scalar(select(AuditLog).where(AuditLog.action == "access_request.approved"))
+        assert job is not None
+        assert job.job_type == "dry_run"
+        assert audit_log is not None
+
+
 def test_report_generation_email_preview_and_verification(app_context):
     client, session_factory, export_dir = app_context
     create_admin_and_login(client)

@@ -1,6 +1,6 @@
 # Building Access Registry
 
-Dockerized internal FastAPI app for managing building access companies, suites, users, access requests, approvals, reports, verification links, and dry-run UniFi Access sync planning.
+Dockerized internal FastAPI app for managing building access companies, suites, users, access requests, approvals, reports, verification links, and dry-run UniFi Access sync planning. The repository now includes a split Next.js dashboard frontend under `frontend/` while preserving the existing Jinja admin UI.
 
 The local PostgreSQL database is the source of truth. UniFi Access is a target access-control system, but Phase 1 and Phase 2 do not write to UniFi.
 
@@ -17,6 +17,8 @@ Implemented:
 - Report preview, CSV export, report run records, and email preview files when `ENABLE_EMAIL=false`.
 - Verification links that allow recipients to mark a report accurate or request changes.
 - Docker Compose / Portainer stack with `web`, `worker`, and `db`.
+- Split dashboard frontend service built with Next.js, TypeScript, NextUI, dark/light mode, sidebar navigation, cards, tables, and forms.
+- JSON API endpoints under `/api` for the Next.js dashboard, while the existing Jinja routes remain available.
 - Existing read-only UniFi exporter code is preserved under `src/`.
 
 Not implemented in Phase 1:
@@ -127,6 +129,7 @@ APP_SECRET_KEY=change_me
 ADMIN_EMAIL=admin@example.com
 ADMIN_INITIAL_PASSWORD=
 PUBLIC_BASE_URL=http://localhost:8080
+BACKEND_API_URL=http://web:8080
 AUTH_MODE=local
 TRUST_PROXY_HEADERS=false
 LOG_LEVEL=INFO
@@ -183,6 +186,17 @@ uvicorn app.main:app --reload --port 8080
 
 Open `http://localhost:8080/setup-admin` to create the first admin.
 
+Run the new dashboard frontend in another shell:
+
+```powershell
+cd frontend
+npm install
+$env:BACKEND_API_URL="http://localhost:8080"
+npm run dev
+```
+
+Open `http://localhost:3000` for the Next.js dashboard. The frontend talks to FastAPI through its own `/api/backend/...` proxy routes.
+
 Run read-only reconciliation from the command line:
 
 ```powershell
@@ -198,7 +212,7 @@ docker compose logs --tail=100 web
 docker compose logs --tail=100 worker
 ```
 
-The app listens on port `8080`. PostgreSQL data is stored in the Docker named volume `building_access_registry_pgdata`. Reports, previews, and exports are written to `/app/exports`.
+The FastAPI backend listens on port `8080`. The Next.js dashboard listens separately on port `3000`. PostgreSQL data is stored in the Docker named volume `building_access_registry_pgdata`. Reports, previews, and exports are written to `/app/exports`.
 
 ## Portainer
 
@@ -207,6 +221,7 @@ Deploy the repository as a Git-backed stack using `docker-compose.yml` or `porta
 Expected services:
 
 - `web`
+- `frontend`
 - `worker`
 - `db`
 
@@ -217,6 +232,8 @@ Expected export bind mount:
 ```
 
 Supply environment variables in Portainer stack settings. Keep `ENABLE_WRITES=false` unless a future phase explicitly implements and approves UniFi write behavior.
+
+Set `BACKEND_API_URL=http://web:8080` for the frontend service in Docker/Portainer. Use `PUBLIC_BASE_URL=http://localhost:8080` or your deployed backend URL for backend-generated links.
 
 After pulling a new version, redeploy the stack and run database migrations before using new schema fields:
 
@@ -232,6 +249,7 @@ In Portainer, use the equivalent stack redeploy flow, then run `alembic upgrade 
 - `ENABLE_WRITES=false` is the default.
 - Phase 1 and Phase 2 write methods in `app/unifi_client.py` raise unless writes are enabled, then raise `NotImplementedError` because UniFi write behavior is intentionally not implemented.
 - The UniFi API token and SMTP password are server-side only.
+- The Next.js dashboard receives no UniFi API token, SMTP password, session secret, or other backend secret. It calls FastAPI through server-side proxy routes.
 - Email disabled mode writes preview files to `EXPORT_DIR/email_previews`.
 - Approval creates `SyncJob` records and audit logs; it does not provision directly.
 - Reconciliation creates local snapshots, open conflicts, and dry-run proposed actions only. It does not call UniFi write APIs.

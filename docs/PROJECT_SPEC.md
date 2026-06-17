@@ -16,7 +16,7 @@ UniFi Access is the target access-control system.
 
 ## Implementation status
 
-Phase 1 and Phase 2 are implemented in this repository: local registry models, request portal, admin UI, reporting, email preview mode, Docker stack, dry-run-only UniFi stubs, read-only UniFi reconciliation, local UniFi snapshots, conflict detection, dry-run proposed sync jobs, and a local-only bootstrap workflow for promoting unmatched UniFi snapshots into local users. Phase 3 through Phase 4 remain future work.
+Phase 1 and Phase 2 are implemented in this repository: local registry models, request portal, admin UI, reporting, email preview mode, Docker stack, dry-run-only UniFi stubs, read-only UniFi reconciliation, local UniFi snapshots, conflict detection, dry-run proposed sync jobs, and a local-only bootstrap workflow for promoting unmatched UniFi snapshots into local users. The application is being split into a FastAPI backend plus a Next.js dashboard frontend; existing Jinja templates remain available while the frontend reaches FastAPI through JSON API endpoints. Phase 3 through Phase 4 remain future work.
 
 ## Primary goals
 
@@ -49,8 +49,10 @@ Do not implement these in v1:
 Recommended stack:
 
 * FastAPI web app
-* Jinja2 templates
-* HTMX for small interactive pieces
+* Jinja2 templates retained for the existing backend UI
+* Next.js dashboard frontend under `frontend/`
+* TypeScript and NextUI for the new dashboard
+* HTMX for small interactive pieces in retained templates
 * Simple CSS
 * PostgreSQL database
 * SQLAlchemy 2.x ORM
@@ -64,6 +66,7 @@ Recommended stack:
 Docker services:
 
 * `web`
+* `frontend`
 * `worker`
 * `db`
 
@@ -84,6 +87,7 @@ APP_SECRET_KEY=change_me
 ADMIN_EMAIL=admin@example.com
 ADMIN_INITIAL_PASSWORD=
 PUBLIC_BASE_URL=http://localhost:8080
+BACKEND_API_URL=http://web:8080
 AUTH_MODE=local
 TRUST_PROXY_HEADERS=false
 LOG_LEVEL=INFO
@@ -132,6 +136,8 @@ REPORT_DEFAULT_TYPE=full_building_access
 * Do not log secrets.
 * Do not expose secrets to templates or browser JavaScript.
 * Admin pages require authentication.
+* JSON admin API routes require the same admin session cookie as the existing admin UI.
+* The frontend must not receive server secrets. It communicates through Next.js API proxy routes configured with `BACKEND_API_URL`.
 * Admin approval is required before sync/provisioning.
 * All UniFi write methods must check `ENABLE_WRITES`.
 * `ENABLE_WRITES=false` must be the default.
@@ -729,6 +735,8 @@ Required bootstrap routes:
 Rules:
 
 * Admin templates should use reusable card, badge, button, table, alert, and diff classes.
+* The Next.js dashboard should provide sidebar navigation, responsive cards, tables, forms, and dark/light mode.
+* The new frontend must preserve request access, admin review, reports, and login/logout workflows before the old templates are removed.
 * Import review screens should highlight changed fields with `.field-changed`, `.diff-before`, and `.diff-after`.
 * The base layout must provide a light/dark theme toggle.
 * Theme preference is stored in browser `localStorage`.
