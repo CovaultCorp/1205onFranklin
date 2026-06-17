@@ -510,6 +510,18 @@ async def run_unifi_reconciliation(
             )
             _add_proposed_action(summary, "review_missing_unifi_user", "Local active user was not found in UniFi.", local_user=local_user)
 
+    import_batch_id = None
+    from app.import_export import create_reconciliation_import_batch
+
+    import_batch = create_reconciliation_import_batch(session, snapshots)
+    if import_batch is not None:
+        session.flush()
+        import_batch_id = import_batch.id
+
+    result_json = summary.as_dict()
+    if import_batch_id:
+        result_json["import_batch_id"] = import_batch_id
+
     job = SyncJob(
         job_type="reconcile",
         status="succeeded",
@@ -517,8 +529,9 @@ async def run_unifi_reconciliation(
             "dry_run": True,
             "message": "Phase 2 read-only reconciliation. No UniFi write API calls were made.",
             "actions": summary.proposed_actions,
+            "import_batch_id": import_batch_id,
         },
-        result_json=summary.as_dict(),
+        result_json=result_json,
         attempt_count=1,
         completed_at=utcnow(),
     )

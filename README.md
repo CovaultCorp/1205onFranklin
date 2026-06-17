@@ -41,9 +41,9 @@ Implemented:
 - Conflict detection for unmatched active users, missing company/suite assignments, status mismatch, name/email mismatch, access policy mismatch, duplicate UniFi email/employee number, inactive company, and inactive suite.
 - Idempotent open-conflict creation on repeated reconciliation runs.
 - Dry-run `SyncJob(job_type="reconcile")` records containing proposed actions only.
-- Admin "Run UniFi Reconciliation" action, reconciliation summary, improved conflict view, and improved sync job view.
+- Admin "Run UniFi Reconciliation" action, reconciliation summary, improved conflict view, improved sync job view, and reviewable import batches for proposed local registry changes.
 - CLI entry point: `python scripts/run_reconcile.py`.
-- Local-only bootstrap CSV and reference ZIP workflow to promote unlinked UniFi snapshots, update linked local users, and store desired UniFi Access Policy/User Group choices.
+- Local-only bootstrap CSV and reference ZIP workflow with preview/commit review batches to promote unlinked UniFi snapshots, update linked local users, and store desired UniFi Access Policy/User Group choices.
 - Exporter-compatible UniFi snapshot normalization, including non-admin email fallbacks, suite number derivation, policy/group names, NFC counts, Touch Pass status/activity, and license plate counts.
 - Reconciliation enriches `/users` list results with read-only per-user detail payloads before storing snapshots, which is required when UniFi omits non-admin email fields from the list response.
 
@@ -72,7 +72,7 @@ Workflow:
 6. Fill in `update_existing=yes` for linked users whose local registry fields should be updated.
 7. Assign each imported row to existing local Company and Suite records, and desired UniFi Access Policy/User Group values, using either IDs or names.
 8. Use `local_suite_id` or `local_suite_number` for the local registry suite. The exported `suite_number` column is the UniFi-derived compatibility value and can also be used by import when the local suite column is blank.
-9. Import a small test batch first, then upload the completed `all_unifi_users.csv`.
+9. Upload a small test batch first, review the generated import batch, then commit it.
 
 The reference ZIP contains:
 
@@ -86,6 +86,10 @@ unifi_user_groups.csv
 
 CSV import:
 
+- Creates an `ImportBatch` preview first; local `User`, `UserSuiteAssignment`, and snapshot links are not changed until an admin clicks Commit.
+- Shows create/update/link/skip/error counts plus row-level before/after diffs.
+- Highlights changed fields with `.field-changed`, `.diff-before`, and `.diff-after`.
+- Blocks commit when any row has validation errors. Cancel leaves local registry records unchanged.
 - Creates local `User` records only when no matching user exists.
 - Matches existing local users by employee number, then email to avoid duplicates.
 - Updates linked local users only when `update_existing=yes`.
@@ -100,11 +104,17 @@ CSV import:
 - Writes audit logs.
 - Does not call UniFi write APIs.
 
+Reconciliation still updates raw observed `UnifiUser` snapshots automatically. Proposed local registry work from unmatched UniFi users is placed in an import batch for admin review instead of being applied automatically.
+
 UniFi Access does not use the app's internal `AccessProfile` field. Access Profiles remain available as optional local templates for other workflows, but the bootstrap master sheet uses the user-facing Company, Suite, UniFi Access Policy, and UniFi User Group terms.
 
 Suite number normalization prefers explicit UniFi fields `suite_number`, `suiteNumber`, or `suite`. If none is present, the app falls back to the first three digits found in `employee_number`, matching the older exporter behavior used by the current building workflow.
 
 After deploying normalization changes, rerun UniFi reconciliation before exporting bootstrap CSVs. Existing snapshot rows keep their previous normalized values until reconciliation refreshes them from UniFi.
+
+## UI and Dark Mode
+
+The admin UI uses reusable CSS utilities for cards, badges, buttons, responsive tables, alerts, and changed-field diffs. A theme toggle in the base layout stores `light` or `dark` in browser `localStorage`; first visit respects the system `prefers-color-scheme` setting. No backend preference or frontend build chain is required.
 
 ## Required Environment Variables
 

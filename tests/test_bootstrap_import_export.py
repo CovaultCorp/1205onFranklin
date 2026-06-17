@@ -215,6 +215,68 @@ def test_import_promotes_unlinked_snapshot_by_id_with_assignments_and_audit(db_c
         assert audit.actor_email == "admin@example.com"
 
 
+def test_bootstrap_import_preview_batch_does_not_commit_and_records_diff(db_context):
+    from app.import_export import create_bootstrap_import_batch
+    from app.models import Company, ImportBatchRow, Suite, UnifiUser, User
+
+    with db_context() as session:
+        company = Company(name="Acme")
+        suite = Suite(suite_number="1200")
+        snapshot = UnifiUser(unifi_user_id="u-1", email="ada@example.com", first_name="Ada", last_name="Lovelace", group_ids=["old"], group_names=["Old"])
+        session.add_all([company, suite, snapshot])
+        session.commit()
+
+        batch = create_bootstrap_import_batch(
+            session,
+            _csv_text(
+                [
+                    {
+                        "promote": "yes",
+                        "unifi_user_id": "u-1",
+                        "email": "ada@example.com",
+                        "first_name": "Ada",
+                        "last_name": "Lovelace",
+                        "company_id": str(company.id),
+                        "local_suite_id": str(suite.id),
+                        "group_ids": "group-1",
+                        "group_names": "Employees",
+                    }
+                ]
+            ),
+        )
+        session.commit()
+
+        row = session.scalar(select(ImportBatchRow).where(ImportBatchRow.import_batch_id == batch.id))
+        assert batch.status == "preview"
+        assert batch.summary_json == {"total_rows": 1, "create_count": 1, "update_count": 0, "link_count": 0, "skip_count": 0, "error_count": 0}
+        assert row.diff_json["company_name"]["after"] == "Acme"
+        assert row.diff_json["current_unifi_user_group_names"]["after"] == ["Employees"]
+        assert session.scalar(select(User).where(User.email == "ada@example.com")) is None
+        assert session.get(UnifiUser, snapshot.id).group_names == ["Old"]
+
+
+def test_import_batch_commit_blocks_validation_errors(db_context):
+    from app.import_export import commit_import_batch, create_bootstrap_import_batch
+    from app.models import Company, Suite, UnifiUser, User
+
+    with db_context() as session:
+        company = Company(name="Acme")
+        suite = Suite(suite_number="1200")
+        session.add_all([company, suite, UnifiUser(unifi_user_id="u-1", email="ada@example.com")])
+        session.commit()
+
+        batch = create_bootstrap_import_batch(
+            session,
+            _csv_text([{"promote": "yes", "unifi_user_id": "u-1", "email": "ada@example.com", "company_name": "Missing", "local_suite_id": str(suite.id)}]),
+        )
+        summary = commit_import_batch(session, batch, actor_email="admin@example.com")
+
+        assert summary.errors
+        assert batch.status == "preview"
+        assert "Resolve validation errors" in batch.last_error
+        assert session.scalar(select(User).where(User.email == "ada@example.com")) is None
+
+
 def test_import_updates_current_unifi_groups_from_bootstrap_group_columns(db_context):
     from app.import_export import import_bootstrap_users_csv
     from app.models import Company, Suite, UnifiUser
