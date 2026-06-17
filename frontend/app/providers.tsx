@@ -1,18 +1,23 @@
 "use client";
 
-import { NextUIProvider } from "@nextui-org/react";
+import { HeroUIProvider } from "@heroui/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider as NextThemesProvider } from "next-themes";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import type { ReactNode } from "react";
 
 export function Providers({ children }: { children: ReactNode }) {
   const router = useRouter();
+  const [queryClient] = useState(() => new QueryClient());
 
   return (
-    <NextUIProvider navigate={router.push}>
-      <NextThemesProvider attribute="class" defaultTheme="system" enableSystem>
-        {children}
-      </NextThemesProvider>
-    </NextUIProvider>
+    <HeroUIProvider navigate={router.push}>
+      <QueryClientProvider client={queryClient}>
+        <NextThemesProvider attribute="class" defaultTheme="system" enableSystem>
+          {children}
+        </NextThemesProvider>
+      </QueryClientProvider>
+    </HeroUIProvider>
   );
 }

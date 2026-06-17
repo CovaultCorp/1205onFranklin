@@ -64,6 +64,7 @@ a {
   position: sticky;
   top: 0;
   height: 100vh;
+  overflow-y: auto;
 }
 
 .content {
@@ -107,8 +108,16 @@ a {
 
 .nav-list {
   display: grid;
-  gap: 6px;
-  margin-top: 28px;
+  gap: 18px;
+}
+
+.nav-section {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  margin: 0 0 7px 12px;
+  text-transform: uppercase;
 }
 
 .nav-item {
@@ -154,9 +163,22 @@ a {
 
 .status.denied,
 .status.failed,
-.status.inactive {
+.status.inactive,
+.status.high {
   background: rgba(248, 113, 113, 0.18);
   color: var(--danger);
+}
+
+.status.medium,
+.status.low,
+.status.open {
+  background: rgba(251, 191, 36, 0.18);
+  color: var(--warning);
+}
+
+.status.resolved {
+  background: rgba(74, 222, 128, 0.18);
+  color: var(--success);
 }
 
 .form-grid {

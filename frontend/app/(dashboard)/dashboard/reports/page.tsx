@@ -15,7 +15,7 @@ import {
   TableColumn,
   TableHeader,
   TableRow
-} from "@nextui-org/react";
+} from "@heroui/react";
 import { Download, FilePlus2, Mail } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import { StatusBadge } from "@/components/status-badge";

@@ -1,9 +1,9 @@
 "use client";
 
-import { Button, Card, CardBody, CardHeader, Input, Select, SelectItem, Textarea } from "@nextui-org/react";
+import { Button, Card, CardBody, CardHeader, Input, Select, SelectItem, Textarea } from "@heroui/react";
 import { Send } from "lucide-react";
 import { FormEvent, useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { submitAccessRequest } from "@/services/requests";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 const requestTypes = [
@@ -27,10 +27,7 @@ export default function RequestAccessPage() {
       Array.from(new FormData(event.currentTarget).entries()).map(([key, value]) => [key, value === "" ? null : value])
     );
     try {
-      const result = await apiFetch<{ request: { id: number } }>("/access-requests", {
-        method: "POST",
-        body: JSON.stringify(data)
-      });
+      const result = await submitAccessRequest(data);
       setSubmittedId(result.request.id);
       event.currentTarget.reset();
     } catch (err) {

@@ -1,73 +1,34 @@
 "use client";
 
-import { Card, CardBody, Input, Spinner, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow } from "@nextui-org/react";
-import { Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { PageTitle } from "@/components/page-title";
+import { DataTable } from "@/components/data-table";
 import { StatusBadge } from "@/components/status-badge";
-import { apiFetch, formatDate } from "@/lib/api";
-
-type UserRow = {
-  id: number;
-  name: string;
-  email: string;
-  employee_number?: string;
-  company?: { name: string };
-  suite?: { suite_number: string };
-  status: string;
-  last_verified_at?: string;
-};
+import { formatDate } from "@/services/client";
+import { getUsers } from "@/services/users";
+import type { User } from "@/types/api";
 
 export default function UsersPage() {
-  const [users, setUsers] = useState<UserRow[]>([]);
-  const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    apiFetch<{ users: UserRow[] }>("/admin/users").then((data) => setUsers(data.users)).finally(() => setLoading(false));
-  }, []);
-
-  const filtered = useMemo(() => {
-    const q = query.toLowerCase();
-    return users.filter((user) => [user.name, user.email, user.company?.name, user.suite?.suite_number].some((value) => value?.toLowerCase().includes(q)));
-  }, [users, query]);
+  const { data, isLoading, error } = useQuery({ queryKey: ["users"], queryFn: getUsers });
 
   return (
     <div className="page">
-      <div className="page-header">
-        <div>
-          <div className="eyebrow">Registry</div>
-          <h1 className="text-3xl font-bold">Users</h1>
-        </div>
-        <Input className="max-w-xs" startContent={<Search size={17} />} placeholder="Search users" value={query} onValueChange={setQuery} />
-      </div>
-      <Card radius="sm">
-        <CardBody>
-          {loading ? <Spinner /> : (
-            <Table aria-label="Users table" removeWrapper>
-              <TableHeader>
-                <TableColumn>Name</TableColumn>
-                <TableColumn>Email</TableColumn>
-                <TableColumn>Company</TableColumn>
-                <TableColumn>Suite</TableColumn>
-                <TableColumn>Status</TableColumn>
-                <TableColumn>Verified</TableColumn>
-              </TableHeader>
-              <TableBody emptyContent="No users found">
-                {filtered.map((user) => (
-                  <TableRow key={user.id}>
-                    <TableCell>{user.name}</TableCell>
-                    <TableCell>{user.email}</TableCell>
-                    <TableCell>{user.company?.name ?? "Unassigned"}</TableCell>
-                    <TableCell>{user.suite?.suite_number ?? "Unassigned"}</TableCell>
-                    <TableCell><StatusBadge value={user.status} /></TableCell>
-                    <TableCell>{formatDate(user.last_verified_at)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardBody>
-      </Card>
+      <PageTitle eyebrow="Access Management" title="Users" description="Search local registry users, assigned companies, suites, profiles, and verification status." />
+      {error ? <p className="text-danger">{error.message}</p> : null}
+      <DataTable<User>
+        ariaLabel="Users"
+        rows={data?.users ?? []}
+        isLoading={isLoading}
+        searchText={(user) => `${user.name} ${user.email} ${user.company?.name ?? ""} ${user.suite?.suite_number ?? ""} ${user.status}`}
+        columns={[
+          { key: "name", label: "Name", render: (user) => user.name, sortable: true },
+          { key: "email", label: "Email", render: (user) => user.email, sortable: true },
+          { key: "company", label: "Company", render: (user) => user.company?.name ?? "Unassigned", sortable: true },
+          { key: "suite", label: "Suite", render: (user) => user.suite?.suite_number ?? "Unassigned", sortable: true },
+          { key: "status", label: "Status", render: (user) => <StatusBadge value={user.status} /> },
+          { key: "verified", label: "Verified", render: (user) => formatDate(user.last_verified_at), sortable: true }
+        ]}
+      />
     </div>
   );
 }

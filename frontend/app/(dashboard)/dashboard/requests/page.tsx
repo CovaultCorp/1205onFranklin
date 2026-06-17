@@ -21,7 +21,7 @@ import {
   TableRow,
   Textarea,
   useDisclosure
-} from "@nextui-org/react";
+} from "@heroui/react";
 import { CheckCircle2, CircleSlash, MessageSquareMore } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import { StatusBadge } from "@/components/status-badge";

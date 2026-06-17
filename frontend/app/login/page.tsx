@@ -1,10 +1,10 @@
 "use client";
 
-import { Button, Card, CardBody, Input } from "@nextui-org/react";
+import { Button, Card, CardBody, Input } from "@heroui/react";
 import { LockKeyhole } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { login } from "@/services/auth";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 export default function LoginPage() {
@@ -18,13 +18,7 @@ export default function LoginPage() {
     setError("");
     const data = new FormData(event.currentTarget);
     try {
-      await apiFetch("/auth/login", {
-        method: "POST",
-        body: JSON.stringify({
-          email: data.get("email"),
-          password: data.get("password")
-        })
-      });
+      await login(String(data.get("email")), String(data.get("password")));
       router.push("/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to log in");

@@ -16,8 +16,11 @@ from app.db import get_session
 from app.models import (
     AccessProfile,
     AccessRequest,
+    AuditLog,
     Company,
+    CompanySuite,
     Conflict,
+    ImportBatch,
     PortalAccount,
     ReportRun,
     Suite,
@@ -93,19 +96,48 @@ def _account_json(account: PortalAccount | None) -> dict[str, Any] | None:
 def _company_json(company: Company | None) -> dict[str, Any] | None:
     if company is None:
         return None
-    return {"id": company.id, "name": company.name, "status": company.status}
+    return {
+        "id": company.id,
+        "name": company.name,
+        "legal_name": company.legal_name,
+        "status": company.status,
+        "primary_contact_name": company.primary_contact_name,
+        "primary_contact_email": company.primary_contact_email,
+        "phone": company.phone,
+        "notes": company.notes,
+        "created_at": company.created_at,
+        "updated_at": company.updated_at,
+    }
 
 
 def _suite_json(suite: Suite | None) -> dict[str, Any] | None:
     if suite is None:
         return None
-    return {"id": suite.id, "suite_number": suite.suite_number, "floor": suite.floor, "status": suite.status}
+    return {
+        "id": suite.id,
+        "suite_number": suite.suite_number,
+        "floor": suite.floor,
+        "building_area": suite.building_area,
+        "description": suite.description,
+        "status": suite.status,
+        "created_at": suite.created_at,
+        "updated_at": suite.updated_at,
+    }
 
 
 def _profile_json(profile: AccessProfile | None) -> dict[str, Any] | None:
     if profile is None:
         return None
-    return {"id": profile.id, "name": profile.name, "active": profile.active}
+    return {
+        "id": profile.id,
+        "name": profile.name,
+        "description": profile.description,
+        "active": profile.active,
+        "unifi_access_policy_ids": profile.unifi_access_policy_ids or [],
+        "unifi_user_group_ids": profile.unifi_user_group_ids or [],
+        "created_at": profile.created_at,
+        "updated_at": profile.updated_at,
+    }
 
 
 def _request_json(access_request: AccessRequest) -> dict[str, Any]:
@@ -167,6 +199,73 @@ def _report_json(run: ReportRun) -> dict[str, Any]:
         "sent_at": run.sent_at,
         "last_error": run.last_error,
         "created_at": run.created_at,
+    }
+
+
+def _conflict_severity(conflict: Conflict) -> str:
+    high = {"duplicate_email", "duplicate_employee_number", "local_active_missing_unifi"}
+    medium = {"status_mismatch", "access_policy_mismatch", "name_email_mismatch"}
+    if conflict.conflict_type in high:
+        return "high"
+    if conflict.conflict_type in medium:
+        return "medium"
+    return "low"
+
+
+def _conflict_json(conflict: Conflict) -> dict[str, Any]:
+    return {
+        "id": conflict.id,
+        "local_user_id": conflict.local_user_id,
+        "unifi_user_id": conflict.unifi_user_id,
+        "conflict_type": conflict.conflict_type,
+        "description": conflict.description,
+        "severity": _conflict_severity(conflict),
+        "status": conflict.status,
+        "created_at": conflict.created_at,
+        "updated_at": conflict.updated_at,
+        "resolved_at": conflict.resolved_at,
+    }
+
+
+def _sync_job_json(job: SyncJob) -> dict[str, Any]:
+    return {
+        "id": job.id,
+        "access_request_id": job.access_request_id,
+        "job_type": job.job_type,
+        "status": job.status,
+        "proposed_actions": job.proposed_actions or {},
+        "result_json": job.result_json or {},
+        "attempt_count": job.attempt_count,
+        "last_error": job.last_error,
+        "created_at": job.created_at,
+        "updated_at": job.updated_at,
+        "completed_at": job.completed_at,
+    }
+
+
+def _audit_log_json(log: AuditLog) -> dict[str, Any]:
+    return {
+        "id": log.id,
+        "actor_email": log.actor_email,
+        "action": log.action,
+        "target_type": log.target_type,
+        "target_id": log.target_id,
+        "created_at": log.created_at,
+    }
+
+
+def _occupancy_json(occupancy: CompanySuite, active_user_count: int = 0) -> dict[str, Any]:
+    return {
+        "id": occupancy.id,
+        "company": _company_json(occupancy.company),
+        "suite": _suite_json(occupancy.suite),
+        "occupancy_status": occupancy.occupancy_status,
+        "start_date": occupancy.start_date,
+        "end_date": occupancy.end_date,
+        "notes": occupancy.notes,
+        "active_user_count": active_user_count,
+        "created_at": occupancy.created_at,
+        "updated_at": occupancy.updated_at,
     }
 
 
@@ -275,17 +374,34 @@ def api_admin_dashboard(
     return {
         "account": _account_json(account),
         "stats": stats,
-        "recent_reports": [_report_json(run) for run in session.scalars(select(ReportRun).order_by(ReportRun.created_at.desc()).limit(5))],
-        "recent_sync_jobs": [
-            {
-                "id": job.id,
-                "job_type": job.job_type,
-                "status": job.status,
-                "created_at": job.created_at,
-                "last_error": job.last_error,
-            }
-            for job in session.scalars(select(SyncJob).order_by(SyncJob.created_at.desc()).limit(5))
+        "recent_requests": [
+            _request_json(access_request)
+            for access_request in session.scalars(select(AccessRequest).order_by(AccessRequest.created_at.desc()).limit(8))
         ],
+        "recent_conflicts": [
+            _conflict_json(conflict)
+            for conflict in session.scalars(select(Conflict).order_by(Conflict.created_at.desc()).limit(8))
+        ],
+        "recent_reports": [_report_json(run) for run in session.scalars(select(ReportRun).order_by(ReportRun.created_at.desc()).limit(5))],
+        "recent_sync_jobs": [_sync_job_json(job) for job in session.scalars(select(SyncJob).order_by(SyncJob.created_at.desc()).limit(8))],
+        "analytics": {
+            "sync_activity": [
+                {"label": "Pending", "value": session.scalar(select(func.count(SyncJob.id)).where(SyncJob.status == "pending")) or 0},
+                {"label": "Succeeded", "value": session.scalar(select(func.count(SyncJob.id)).where(SyncJob.status == "succeeded")) or 0},
+                {"label": "Failed", "value": session.scalar(select(func.count(SyncJob.id)).where(SyncJob.status == "failed")) or 0},
+            ],
+            "conflict_summary": [
+                {
+                    "label": severity.title(),
+                    "value": sum(1 for conflict in session.scalars(select(Conflict)).all() if _conflict_severity(conflict) == severity),
+                }
+                for severity in ["high", "medium", "low"]
+            ],
+            "verification_status": [
+                {"label": "Current", "value": stats["active_users"] - stats["stale_verification"]},
+                {"label": "Stale", "value": stats["stale_verification"]},
+            ],
+        },
     }
 
 
@@ -433,6 +549,167 @@ def api_admin_users(
     account: PortalAccount = Depends(_require_api_admin),
 ):
     return {"users": [_user_json(user) for user in session.scalars(select(User).order_by(User.last_name, User.first_name)).all()]}
+
+
+@router.get("/admin/companies")
+def api_admin_companies(
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(_require_api_admin),
+):
+    companies = []
+    for company in session.scalars(select(Company).order_by(Company.name)).all():
+        item = _company_json(company) or {}
+        item["active_user_count"] = session.scalar(
+            select(func.count(User.id)).where(User.company_id == company.id, User.status == "active")
+        ) or 0
+        item["suite_count"] = session.scalar(select(func.count(CompanySuite.id)).where(CompanySuite.company_id == company.id)) or 0
+        companies.append(item)
+    return {"companies": companies}
+
+
+@router.get("/admin/suites")
+def api_admin_suites(
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(_require_api_admin),
+):
+    suites = []
+    for suite in session.scalars(select(Suite).order_by(Suite.suite_number)).all():
+        item = _suite_json(suite) or {}
+        occupancy = session.scalar(
+            select(CompanySuite).where(CompanySuite.suite_id == suite.id, CompanySuite.occupancy_status == "active")
+        )
+        item["assigned_company"] = _company_json(occupancy.company) if occupancy else None
+        item["active_user_count"] = session.scalar(
+            select(func.count(User.id)).where(User.primary_suite_id == suite.id, User.status == "active")
+        ) or 0
+        suites.append(item)
+    return {"suites": suites}
+
+
+@router.get("/admin/occupancy")
+def api_admin_occupancy(
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(_require_api_admin),
+):
+    rows = []
+    for occupancy in session.scalars(select(CompanySuite).order_by(CompanySuite.created_at.desc())).all():
+        active_count = session.scalar(
+            select(func.count(User.id)).where(
+                User.company_id == occupancy.company_id,
+                User.primary_suite_id == occupancy.suite_id,
+                User.status == "active",
+            )
+        ) or 0
+        rows.append(_occupancy_json(occupancy, active_count))
+    return {"occupancy": rows}
+
+
+@router.get("/admin/access-profiles")
+def api_admin_access_profiles(
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(_require_api_admin),
+):
+    profiles = []
+    for profile in session.scalars(select(AccessProfile).order_by(AccessProfile.name)).all():
+        item = _profile_json(profile) or {}
+        item["assignment_count"] = session.scalar(select(func.count(User.id)).where(User.access_profile_id == profile.id)) or 0
+        profiles.append(item)
+    return {"profiles": profiles}
+
+
+@router.get("/admin/conflicts")
+def api_admin_conflicts(
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(_require_api_admin),
+):
+    return {"conflicts": [_conflict_json(conflict) for conflict in session.scalars(select(Conflict).order_by(Conflict.created_at.desc())).all()]}
+
+
+@router.post("/admin/conflicts/{conflict_id}/resolve")
+def api_resolve_conflict(
+    conflict_id: int,
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(_require_api_admin),
+):
+    conflict = session.get(Conflict, conflict_id)
+    if conflict is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conflict not found")
+    conflict.status = "resolved"
+    conflict.resolved_by_account_id = account.id
+    conflict.resolved_at = utcnow()
+    session.commit()
+    return {"conflict": _conflict_json(conflict)}
+
+
+@router.get("/admin/sync-jobs")
+def api_admin_sync_jobs(
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(_require_api_admin),
+):
+    return {"sync_jobs": [_sync_job_json(job) for job in session.scalars(select(SyncJob).order_by(SyncJob.created_at.desc())).all()]}
+
+
+@router.get("/admin/bootstrap")
+def api_admin_bootstrap(
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(_require_api_admin),
+):
+    unmatched = session.scalars(select(UnifiUser).where(UnifiUser.local_user_id.is_(None)).order_by(UnifiUser.email, UnifiUser.unifi_user_id)).all()
+    batches = session.scalars(select(ImportBatch).order_by(ImportBatch.created_at.desc()).limit(12)).all()
+    return {
+        "unmatched_count": len(unmatched),
+        "unmatched": [
+            {
+                "id": user.id,
+                "unifi_user_id": user.unifi_user_id,
+                "name": user.full_name or f"{user.first_name or ''} {user.last_name or ''}".strip(),
+                "email": user.email,
+                "employee_number": user.employee_number,
+                "suite_number": user.suite_number,
+                "status": user.status,
+                "last_seen_at": user.last_seen_at,
+            }
+            for user in unmatched
+        ],
+        "recent_batches": [
+            {
+                "id": batch.id,
+                "source": batch.source,
+                "status": batch.status,
+                "filename": batch.filename,
+                "summary_json": batch.summary_json or {},
+                "created_at": batch.created_at,
+                "committed_at": batch.committed_at,
+            }
+            for batch in batches
+        ],
+    }
+
+
+@router.get("/admin/audit-logs")
+def api_admin_audit_logs(
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(_require_api_admin),
+):
+    return {"audit_logs": [_audit_log_json(log) for log in session.scalars(select(AuditLog).order_by(AuditLog.created_at.desc()).limit(250)).all()]}
+
+
+@router.get("/admin/settings")
+def api_admin_settings(
+    account: PortalAccount = Depends(_require_api_admin),
+):
+    settings = get_settings()
+    return {
+        "settings": {
+            "public_base_url": settings.public_base_url,
+            "auth_mode": settings.auth_mode,
+            "enable_writes": settings.enable_writes,
+            "enable_email": settings.enable_email,
+            "enable_scheduled_reports": settings.enable_scheduled_reports,
+            "report_default_type": settings.report_default_type,
+            "report_timezone": settings.report_timezone,
+        }
+    }
 
 
 @router.get("/admin/lookups")
