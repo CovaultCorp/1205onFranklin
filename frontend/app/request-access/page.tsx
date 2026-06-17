@@ -64,7 +64,7 @@ export default function RequestAccessPage() {
             <form className="form-grid mt-4" onSubmit={submit}>
               <Select name="request_type" label="Request type" defaultSelectedKeys={["new_access"]} isRequired>
                 {requestTypes.map(([key, label]) => (
-                  <SelectItem key={key} value={key}>
+                  <SelectItem key={key}>
                     {label}
                   </SelectItem>
                 ))}

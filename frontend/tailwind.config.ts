@@ -11,7 +11,7 @@ const config: Config = {
   theme: {
     extend: {}
   },
-  plugins: [heroui()]
+  plugins: [heroui() as any]
 };
 
 export default config;
