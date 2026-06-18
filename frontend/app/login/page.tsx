@@ -1,10 +1,9 @@
 "use client";
 
 import { Button, Card, CardBody, Divider, Input } from "@heroui/react";
-import { LockKeyhole, Mail, ShieldCheck } from "lucide-react";
+import { LockKeyhole, Mail } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
-import { BrandLogo } from "@/components/brand-logo";
 import { login } from "@/services/auth";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -35,21 +34,12 @@ export default function LoginPage() {
       </div>
 
       <section className="login-card-wrap" aria-labelledby="login-title">
-        <div className="login-logo">
-          <BrandLogo href="" size="auth" />
-        </div>
-
-        <Card className="login-card" radius="sm" shadow="sm">
+        <Card className="login-card" radius="lg" shadow="sm">
           <CardBody className="login-card-body">
             <div className="login-heading">
-              <div className="login-icon" aria-hidden="true">
-                <ShieldCheck size={20} />
-              </div>
-              <div>
-                <p className="login-eyebrow">Secure dashboard access</p>
-                <h1 id="login-title">Building Access Registry</h1>
-                <p>Sign in to manage 1205 on Franklin access records.</p>
-              </div>
+              <p className="login-brand">ENTRY POINT</p>
+              <h1 id="login-title">Building Access &amp; Tenant Management</h1>
+              <p>Manage tenant access, permissions, and building security for 1205 on Franklin.</p>
             </div>
 
             <Divider className="login-divider" />
@@ -61,6 +51,9 @@ export default function LoginPage() {
                 type="email"
                 autoComplete="email"
                 variant="bordered"
+                labelPlacement="outside"
+                placeholder="Email"
+                size="lg"
                 isRequired
                 startContent={<Mail aria-hidden="true" className="login-input-icon" size={17} />}
               />
@@ -70,6 +63,9 @@ export default function LoginPage() {
                 type="password"
                 autoComplete="current-password"
                 variant="bordered"
+                labelPlacement="outside"
+                placeholder="Password"
+                size="lg"
                 isRequired
                 startContent={<LockKeyhole aria-hidden="true" className="login-input-icon" size={17} />}
               />
@@ -78,7 +74,7 @@ export default function LoginPage() {
                   {error}
                 </div>
               ) : null}
-              <Button className="login-submit" type="submit" isLoading={loading}>
+              <Button className="login-submit" type="submit" size="lg" fullWidth isLoading={loading}>
                 Sign In
               </Button>
             </form>
