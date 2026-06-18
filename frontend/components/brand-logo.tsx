@@ -3,7 +3,7 @@ import Image from "next/image";
 
 type BrandLogoProps = {
   href?: string;
-  size?: "sidebar" | "auth" | "compact";
+  size?: "sidebar" | "auth" | "compact" | "public";
 };
 
 export function BrandLogo({ href = "/dashboard", size = "sidebar" }: BrandLogoProps) {

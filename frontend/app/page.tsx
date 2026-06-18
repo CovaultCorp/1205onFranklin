@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import { Public1205Site } from "@/components/public-1205-site";
 
 export default function Home() {
-  redirect("/dashboard");
+  return <Public1205Site />;
 }
