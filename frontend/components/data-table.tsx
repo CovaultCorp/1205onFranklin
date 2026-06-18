@@ -1,7 +1,7 @@
 "use client";
 
 import { Card, CardBody, Input, Pagination, Spinner, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow } from "@heroui/react";
-import { Search } from "lucide-react";
+import { Search, TableProperties } from "lucide-react";
 import { ReactNode, useMemo, useState } from "react";
 
 export type Column<T> = {
@@ -59,8 +59,8 @@ export function DataTable<T extends { id: number | string }>({
   }
 
   return (
-    <Card radius="sm" shadow="sm">
-      <CardBody className="gap-4">
+    <Card className="dashboard-panel" radius="sm" shadow="sm">
+      <CardBody className="gap-4 p-5">
         <Input
           aria-label={`Search ${ariaLabel}`}
           className="max-w-sm"
@@ -83,7 +83,7 @@ export function DataTable<T extends { id: number | string }>({
                 </TableColumn>
               ))}
             </TableHeader>
-            <TableBody emptyContent={emptyContent}>
+            <TableBody emptyContent={<EmptyTableState message={emptyContent} />}>
               {visible.map((row) => (
                 <TableRow key={row.id}>
                   {columns.map((column) => <TableCell key={column.key}>{column.render(row)}</TableCell>)}
@@ -92,10 +92,24 @@ export function DataTable<T extends { id: number | string }>({
             </TableBody>
           </Table>
         )}
-        <div className="flex justify-end">
-          <Pagination page={page} total={pages} onChange={setPage} showControls />
-        </div>
+        {filtered.length > pageSize ? (
+          <div className="flex justify-end">
+            <Pagination page={page} total={pages} onChange={setPage} showControls />
+          </div>
+        ) : null}
       </CardBody>
     </Card>
+  );
+}
+
+function EmptyTableState({ message }: { message: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-10 text-center">
+      <div className="mb-3 rounded-full bg-default-100 p-3 text-default-400">
+        <TableProperties size={22} />
+      </div>
+      <div className="text-sm font-semibold">{message}</div>
+      <div className="mt-1 text-xs text-default-500">New records will appear here as activity is captured.</div>
+    </div>
   );
 }

@@ -1,13 +1,13 @@
 "use client";
 
-import { Button, Card, CardBody, Spinner } from "@heroui/react";
+import { Button, Card, CardBody, Chip, Spinner } from "@heroui/react";
 import {
   AlertTriangle,
+  ArrowRight,
   Building2,
   ClipboardList,
   DatabaseZap,
   DoorOpen,
-  FileStack,
   Layers3,
   ShieldCheck,
   Users
@@ -17,23 +17,83 @@ import { useQuery } from "@tanstack/react-query";
 import { BarMetricChart, DonutMetricChart } from "@/components/charts";
 import { DataTable } from "@/components/data-table";
 import { KpiCard } from "@/components/kpi-card";
-import { PageTitle } from "@/components/page-title";
 import { StatusBadge } from "@/components/status-badge";
 import { getDashboard } from "@/services/dashboard";
 import { formatDate } from "@/services/client";
 import type { AccessRequest, Conflict, SyncJob } from "@/types/api";
 
-const shortcuts = [
-  { href: "/dashboard/requests", label: "Requests", icon: ClipboardList },
-  { href: "/dashboard/users", label: "Users", icon: Users },
-  { href: "/dashboard/companies", label: "Companies", icon: Building2 },
-  { href: "/dashboard/suites", label: "Suites", icon: DoorOpen },
-  { href: "/dashboard/occupancy", label: "Occupancy", icon: Layers3 },
-  { href: "/dashboard/access-profiles", label: "Access Profiles", icon: ShieldCheck },
-  { href: "/dashboard/conflicts", label: "Conflicts", icon: AlertTriangle },
-  { href: "/dashboard/sync-jobs", label: "Sync Jobs", icon: DatabaseZap },
-  { href: "/dashboard/bootstrap", label: "Bootstrap Users", icon: FileStack }
-];
+const modules = [
+  {
+    href: "/dashboard/requests",
+    title: "Requests",
+    description: "Review submitted access changes and approvals.",
+    icon: ClipboardList,
+    tone: "primary"
+  },
+  {
+    href: "/dashboard/users",
+    title: "Users",
+    description: "Search local registry users and access state.",
+    icon: Users,
+    tone: "success"
+  },
+  {
+    href: "/dashboard/companies",
+    title: "Companies",
+    description: "Manage tenant organizations and contacts.",
+    icon: Building2,
+    tone: "primary"
+  },
+  {
+    href: "/dashboard/suites",
+    title: "Suites",
+    description: "Review suite inventory and assignments.",
+    icon: DoorOpen,
+    tone: "warning"
+  },
+  {
+    href: "/dashboard/occupancy",
+    title: "Occupancy",
+    description: "Track company-suite occupancy relationships.",
+    icon: Layers3,
+    tone: "primary"
+  },
+  {
+    href: "/dashboard/access-profiles",
+    title: "Access Profiles",
+    description: "View local profile templates and mappings.",
+    icon: ShieldCheck,
+    tone: "success"
+  },
+  {
+    href: "/dashboard/conflicts",
+    title: "Conflicts",
+    description: "Resolve reconciliation exceptions.",
+    icon: AlertTriangle,
+    tone: "danger"
+  },
+  {
+    href: "/dashboard/sync-jobs",
+    title: "Sync Jobs",
+    description: "Inspect dry-run jobs and worker outcomes.",
+    icon: DatabaseZap,
+    tone: "warning"
+  },
+  {
+    href: "/dashboard/reports",
+    title: "Reports",
+    description: "Generate previews, CSV exports, and emails.",
+    icon: ClipboardList,
+    tone: "primary"
+  }
+] as const;
+
+const toneClasses = {
+  primary: "bg-primary-100 text-primary",
+  success: "bg-success-100 text-success",
+  warning: "bg-warning-100 text-warning",
+  danger: "bg-danger-100 text-danger"
+};
 
 export default function DashboardPage() {
   const { data, isLoading, error } = useQuery({ queryKey: ["dashboard"], queryFn: getDashboard });
@@ -41,76 +101,144 @@ export default function DashboardPage() {
   if (error) return <div className="page text-danger">{error.message}</div>;
   if (isLoading || !data) return <div className="page flex justify-center py-20"><Spinner /></div>;
 
+  const syncFailures = data.stats.sync_failures ?? 0;
+  const openConflicts = data.stats.open_conflicts ?? 0;
+
   return (
     <div className="page">
-      <PageTitle
-        eyebrow="Operations"
-        title="Building access dashboard"
-        description="Live registry health, review queues, conflicts, and dry-run synchronization activity."
-      />
-      <div className="dashboard-grid">
-        <KpiCard label="Active Users" value={data.stats.active_users ?? 0} icon={Users} trend="Source-of-truth registry" tone="success" />
-        <KpiCard label="Pending Requests" value={data.stats.pending_requests ?? 0} icon={ClipboardList} trend="Awaiting admin review" tone="warning" />
-        <KpiCard label="Open Conflicts" value={data.stats.open_conflicts ?? 0} icon={AlertTriangle} trend="Needs reconciliation review" tone="danger" />
-        <KpiCard label="Stale Verifications" value={data.stats.stale_verification ?? 0} icon={ShieldCheck} trend="Older than 90 days" tone="warning" />
-        <KpiCard label="Sync Failures" value={data.stats.sync_failures ?? 0} icon={DatabaseZap} trend="Dry-run or worker failures" tone="danger" />
-      </div>
+      <section className="dashboard-hero">
+        <div>
+          <div className="eyebrow">Building Access Registry</div>
+          <h1 className="mt-2 text-3xl font-bold tracking-tight md:text-4xl">Operations dashboard</h1>
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-default-500">
+            Monitor the local registry source of truth, review access workflows, and keep UniFi sync planning visible without enabling write behavior.
+          </p>
+        </div>
+        <div className="dashboard-hero-actions">
+          <Chip color={syncFailures ? "danger" : "success"} variant="flat">
+            {syncFailures ? `${syncFailures} sync failures` : "Sync healthy"}
+          </Chip>
+          <Chip color={openConflicts ? "warning" : "success"} variant="flat">
+            {openConflicts ? `${openConflicts} conflicts open` : "No open conflicts"}
+          </Chip>
+          <Button as={Link} href="/dashboard/requests" color="primary" endContent={<ArrowRight size={16} />}>
+            Review requests
+          </Button>
+        </div>
+      </section>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-3">
-        {shortcuts.map((item) => {
-          const Icon = item.icon;
-          return (
-            <Card key={item.href} radius="sm" shadow="sm" isPressable as={Link} href={item.href}>
-              <CardBody className="flex-row items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-lg bg-primary-100 p-2 text-primary"><Icon size={18} /></div>
-                  <span className="font-semibold">{item.label}</span>
-                </div>
-                <Button size="sm" variant="light">Open</Button>
-              </CardBody>
-            </Card>
-          );
-        })}
-      </div>
+      <section className="dashboard-grid kpi-grid">
+        <KpiCard
+          label="Active Users"
+          value={data.stats.active_users ?? 0}
+          icon={Users}
+          helper="People currently active in the registry"
+          trend="Source-of-truth"
+          tone="success"
+        />
+        <KpiCard
+          label="Pending Requests"
+          value={data.stats.pending_requests ?? 0}
+          icon={ClipboardList}
+          helper="Submitted items awaiting admin action"
+          trend="Approval queue"
+          tone="warning"
+        />
+        <KpiCard
+          label="Open Conflicts"
+          value={openConflicts}
+          icon={AlertTriangle}
+          helper="Reconciliation issues needing review"
+          trend="Operational risk"
+          tone={openConflicts ? "danger" : "success"}
+        />
+        <KpiCard
+          label="Stale Verifications"
+          value={data.stats.stale_verification ?? 0}
+          icon={ShieldCheck}
+          helper="Active users not verified recently"
+          trend="90 day threshold"
+          tone="warning"
+        />
+      </section>
 
-      <div className="mt-6 grid gap-4 xl:grid-cols-3">
+      <section className="mt-8">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-bold">Management shortcuts</h2>
+            <p className="mt-1 text-sm text-default-500">Jump into the modules used most often by building operations.</p>
+          </div>
+        </div>
+        <div className="module-grid">
+          {modules.map((item) => {
+            const Icon = item.icon;
+            return (
+              <Card key={item.href} className="module-card" radius="sm" shadow="sm" isPressable as={Link} href={item.href}>
+                <CardBody className="gap-4 p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className={`rounded-xl p-3 ${toneClasses[item.tone]}`}>
+                      <Icon size={20} />
+                    </div>
+                    <ArrowRight className="text-default-400" size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold">{item.title}</h3>
+                    <p className="mt-1 text-sm leading-5 text-default-500">{item.description}</p>
+                  </div>
+                </CardBody>
+              </Card>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="mt-8 grid gap-4 xl:grid-cols-3">
         <BarMetricChart title="Sync Activity" data={data.analytics.sync_activity} />
         <DonutMetricChart title="Conflict Summary" data={data.analytics.conflict_summary} />
         <BarMetricChart title="Verification Status" data={data.analytics.verification_status} />
-      </div>
+      </section>
 
-      <div className="mt-6 grid gap-4 xl:grid-cols-3">
-        <DataTable<AccessRequest>
-          ariaLabel="Recent requests"
-          rows={data.recent_requests}
-          searchText={(row) => `${row.requested_for_first_name} ${row.requested_for_last_name} ${row.status}`}
-          columns={[
-            { key: "person", label: "Person", render: (row) => `${row.requested_for_first_name} ${row.requested_for_last_name}`, sortable: true },
-            { key: "status", label: "Status", render: (row) => <StatusBadge value={row.status} /> },
-            { key: "created", label: "Created", render: (row) => formatDate(row.created_at), sortable: true }
-          ]}
-        />
-        <DataTable<SyncJob>
-          ariaLabel="Recent sync jobs"
-          rows={data.recent_sync_jobs}
-          searchText={(row) => `${row.job_type} ${row.status}`}
-          columns={[
-            { key: "job", label: "Job", render: (row) => row.job_type, sortable: true },
-            { key: "status", label: "Status", render: (row) => <StatusBadge value={row.status} /> },
-            { key: "created", label: "Created", render: (row) => formatDate(row.created_at), sortable: true }
-          ]}
-        />
-        <DataTable<Conflict>
-          ariaLabel="Recent conflicts"
-          rows={data.recent_conflicts}
-          searchText={(row) => `${row.conflict_type} ${row.severity} ${row.status}`}
-          columns={[
-            { key: "type", label: "Type", render: (row) => row.conflict_type.replaceAll("_", " "), sortable: true },
-            { key: "severity", label: "Severity", render: (row) => <StatusBadge value={row.severity} /> },
-            { key: "status", label: "Status", render: (row) => <StatusBadge value={row.status} /> }
-          ]}
-        />
-      </div>
+      <section className="mt-8">
+        <div className="mb-4">
+          <h2 className="text-xl font-bold">Recent activity</h2>
+          <p className="mt-1 text-sm text-default-500">Latest requests, dry-run sync work, and conflicts from the backend.</p>
+        </div>
+        <div className="grid gap-4 xl:grid-cols-3">
+          <DataTable<AccessRequest>
+            ariaLabel="Recent requests"
+            rows={data.recent_requests}
+            emptyContent="No recent requests"
+            searchText={(row) => `${row.requested_for_first_name} ${row.requested_for_last_name} ${row.status}`}
+            columns={[
+              { key: "person", label: "Person", render: (row) => `${row.requested_for_first_name} ${row.requested_for_last_name}`, sortable: true },
+              { key: "status", label: "Status", render: (row) => <StatusBadge value={row.status} /> },
+              { key: "created", label: "Created", render: (row) => formatDate(row.created_at), sortable: true }
+            ]}
+          />
+          <DataTable<SyncJob>
+            ariaLabel="Recent sync jobs"
+            rows={data.recent_sync_jobs}
+            emptyContent="No recent sync jobs"
+            searchText={(row) => `${row.job_type} ${row.status}`}
+            columns={[
+              { key: "job", label: "Job", render: (row) => row.job_type, sortable: true },
+              { key: "status", label: "Status", render: (row) => <StatusBadge value={row.status} /> },
+              { key: "created", label: "Created", render: (row) => formatDate(row.created_at), sortable: true }
+            ]}
+          />
+          <DataTable<Conflict>
+            ariaLabel="Recent conflicts"
+            rows={data.recent_conflicts}
+            emptyContent="No recent conflicts"
+            searchText={(row) => `${row.conflict_type} ${row.severity} ${row.status}`}
+            columns={[
+              { key: "type", label: "Type", render: (row) => row.conflict_type.replaceAll("_", " "), sortable: true },
+              { key: "severity", label: "Severity", render: (row) => <StatusBadge value={row.severity} /> },
+              { key: "status", label: "Status", render: (row) => <StatusBadge value={row.status} /> }
+            ]}
+          />
+        </div>
+      </section>
     </div>
   );
 }
