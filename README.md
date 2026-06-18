@@ -114,6 +114,18 @@ Suite number normalization prefers explicit UniFi fields `suite_number`, `suiteN
 
 After deploying normalization changes, rerun UniFi reconciliation before exporting bootstrap CSVs. Existing snapshot rows keep their previous normalized values until reconciliation refreshes them from UniFi.
 
+## Import Old UniFi Dump
+
+For the older `all_unifi_users.csv` format with columns `Name, Email, Company, Suite, Status`, use the safe importer. It is a dry run by default:
+
+```powershell
+python scripts/import_unifi_old_dump.py all_unifi_users.csv
+python scripts/import_unifi_old_dump.py all_unifi_users.csv --commit
+python scripts/import_unifi_old_dump.py all_unifi_users.csv --commit --placeholder-emails
+```
+
+Rows with blank emails still create/update `UnifiUser` snapshots. Local `User` records are created only when a valid email exists, unless `--placeholder-emails` is passed.
+
 ## UI and Dark Mode
 
 The admin UI uses reusable CSS utilities for cards, badges, buttons, responsive tables, alerts, and changed-field diffs. A theme toggle in the base layout stores `light` or `dark` in browser `localStorage`; first visit respects the system `prefers-color-scheme` setting. No backend preference or frontend build chain is required.
