@@ -119,12 +119,46 @@ After deploying normalization changes, rerun UniFi reconciliation before exporti
 For the older `all_unifi_users.csv` format with columns `Name, Email, Company, Suite, Status`, use the safe importer. It is a dry run by default:
 
 ```powershell
-python scripts/import_unifi_old_dump.py all_unifi_users.csv
+python scripts/import_unifi_old_dump.py all_unifi_users.csv --dry-run
 python scripts/import_unifi_old_dump.py all_unifi_users.csv --commit
 python scripts/import_unifi_old_dump.py all_unifi_users.csv --commit --placeholder-emails
 ```
 
-Rows with blank emails still create/update `UnifiUser` snapshots. Local `User` records are created only when a valid email exists, unless `--placeholder-emails` is passed.
+Rows with blank emails still create/update `UnifiUser` snapshots. Local `User` records are created only when a valid email exists, unless `--placeholder-emails` is passed. Placeholder emails are deterministic, using:
+
+```text
+unifi-{slugified-name}-{row-number}@placeholder.local
+```
+
+The importer uses the app's SQLAlchemy models and active `DATABASE_URL`; it does not hardcode credentials, drop tables, truncate tables, or reset production data. The command is idempotent and safe to rerun. It prints the connected database host/name with the password hidden, previews all create/update/reuse counts, and requires explicit confirmation for `--commit` unless `--yes` is supplied.
+
+### Railway legacy UniFi import
+
+Upload or place `all_unifi_users.csv` where the Railway one-off command can read it, then run a dry run first:
+
+```bash
+railway run python scripts/import_unifi_old_dump.py all_unifi_users.csv --dry-run
+```
+
+If the preview looks correct, commit with noninteractive confirmation:
+
+```bash
+railway run python scripts/import_unifi_old_dump.py all_unifi_users.csv --commit --yes
+```
+
+To create local users for blank-email rows with deterministic placeholder emails:
+
+```bash
+railway run python scripts/import_unifi_old_dump.py all_unifi_users.csv --commit --placeholder-emails --yes
+```
+
+Alternative explicit database URL form:
+
+```bash
+DATABASE_URL="$RAILWAY_DATABASE_URL" python scripts/import_unifi_old_dump.py all_unifi_users.csv --commit
+```
+
+Never commit `.env` files or database secrets. Run the dry run against production before committing, and confirm the printed host/database are the intended Railway database.
 
 ## UI and Dark Mode
 

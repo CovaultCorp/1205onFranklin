@@ -7,8 +7,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Building Access Registry",
-  description: "Dashboard for access requests, approvals, reports, and registry users"
+  title: "1205 on Franklin | Private Office Suites",
+  description: "Private office suites in downtown Tampa at 1205 N Franklin Street"
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

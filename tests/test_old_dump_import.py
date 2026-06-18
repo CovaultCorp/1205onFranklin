@@ -73,7 +73,7 @@ def test_old_dump_import_commit_creates_registry_and_snapshot_records(db_context
         company = session.scalar(select(Company).where(Company.name == "Acme"))
         suite = session.scalar(select(Suite).where(Suite.suite_number == "1200"))
         user = session.scalar(select(User).where(User.email == "ada@example.com"))
-        snapshot = session.scalar(select(UnifiUser).where(UnifiUser.unifi_user_id == "old-dump-email-ada@example.com"))
+        snapshot = session.scalar(select(UnifiUser).where(UnifiUser.unifi_user_id == "old-dump-row-2-ada-example-com"))
         assignment = session.scalar(select(UserSuiteAssignment).where(UserSuiteAssignment.user_id == user.id))
         occupancy = session.scalar(select(CompanySuite).where(CompanySuite.company_id == company.id, CompanySuite.suite_id == suite.id))
 
@@ -133,7 +133,7 @@ def test_old_dump_import_placeholder_email_creates_user_for_blank_email(db_conte
 
         expected_email = "unifi-lobby-phone-2@placeholder.local"
         user = session.scalar(select(User).where(User.email == expected_email))
-        snapshot = session.scalar(select(UnifiUser).where(UnifiUser.unifi_user_id == f"old-dump-email-{expected_email}"))
+        snapshot = session.scalar(select(UnifiUser).where(UnifiUser.unifi_user_id == "old-dump-row-2-unifi-lobby-phone-2-placeholder-local"))
         assert summary.users_created == 1
         assert summary.users_skipped_blank_email == 0
         assert user is not None
@@ -169,6 +169,33 @@ def test_old_dump_import_is_idempotent_and_updates_duplicate_email(db_context, t
         assert second_summary.unifi_snapshots_updated == 1
         assert users[0].last_name == "Byron"
         assert users[0].status == "inactive"
+
+
+def test_old_dump_import_duplicate_emails_in_same_csv_do_not_crash(db_context, tmp_path):
+    from scripts.import_unifi_old_dump import import_old_dump, read_old_dump
+    from app.models import UnifiUser, User
+
+    csv_path = _write_csv(
+        tmp_path / "all_unifi_users.csv",
+        [
+            {"Name": "Ada Lovelace", "Email": "ada@example.com", "Company": "Acme", "Suite": "1200", "Status": "active"},
+            {"Name": "Ada Byron", "Email": "ada@example.com", "Company": "Acme", "Suite": "1201", "Status": "inactive"},
+        ],
+    )
+    rows, _warnings = read_old_dump(csv_path, placeholder_emails=False)
+
+    with db_context() as session:
+        summary = import_old_dump(session, rows)
+        session.commit()
+
+        users = session.scalars(select(User)).all()
+        snapshots = session.scalars(select(UnifiUser).order_by(UnifiUser.unifi_user_id)).all()
+        assert summary.duplicate_emails == ["ada@example.com"]
+        assert summary.users_created == 1
+        assert summary.users_updated == 1
+        assert len(users) == 1
+        assert len(snapshots) == 2
+        assert users[0].last_name == "Byron"
 
 
 def test_old_dump_import_rejects_rows_missing_name_and_email(tmp_path):

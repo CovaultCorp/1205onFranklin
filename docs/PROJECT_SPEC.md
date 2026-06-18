@@ -719,6 +719,28 @@ Rules:
 * UniFi Access does not use the app's internal `AccessProfile` field; access profiles remain optional local templates and are not required for bootstrap.
 * Suite number normalization prefers explicit UniFi fields `suite_number`, `suiteNumber`, or `suite`; if absent, it falls back to the first three digits found in `employee_number`. This fallback is retained for compatibility with the current building registry workflow.
 
+## Legacy UniFi dump import
+
+The repository includes a production-safe command for the older `all_unifi_users.csv` format with columns `Name`, `Email`, `Company`, `Suite`, and `Status`.
+
+Rules:
+
+* The command uses the app's configured `DATABASE_URL` and SQLAlchemy models.
+* Dry-run is the default and must roll back all proposed changes.
+* `--commit` is required to write changes.
+* Before committing, the command prints the connected database host/name with credentials hidden and requires confirmation unless `--yes` is supplied.
+* The command must not drop, truncate, reset, or hand-edit tables.
+* The import is idempotent and safe to rerun.
+* Company records are created or reused by normalized company name.
+* Suite records are created or reused by normalized suite number.
+* CompanySuite records are created or reused for company/suite occupancy.
+* Local User records are created or updated only when a valid email exists.
+* Blank-email rows do not create local users by default.
+* `--placeholder-emails` creates deterministic placeholder emails for blank-email rows using `unifi-{slugified-name}-{row-number}@placeholder.local`.
+* Duplicate emails in the CSV must not crash the import; existing users are updated rather than duplicated.
+* Every accepted CSV row is preserved in `UnifiUser` import snapshots when the schema supports the snapshot table.
+* The command prints preview counts before commit and final database counts after commit.
+
 Required bootstrap routes:
 
 * GET /admin/bootstrap

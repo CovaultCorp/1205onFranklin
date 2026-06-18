@@ -4,6 +4,7 @@ import argparse
 import csv
 import re
 import sys
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -12,7 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal, init_db
@@ -25,13 +27,20 @@ Import an old UniFi dump CSV with columns:
 
 Dry-run is the default and writes nothing:
 
-    python scripts/import_unifi_old_dump.py all_unifi_users.csv
+    python scripts/import_unifi_old_dump.py all_unifi_users.csv --dry-run
     python scripts/import_unifi_old_dump.py all_unifi_users.csv --commit
     python scripts/import_unifi_old_dump.py all_unifi_users.csv --commit --placeholder-emails
+
+Production/Railway:
+
+    railway run python scripts/import_unifi_old_dump.py all_unifi_users.csv --dry-run
+    railway run python scripts/import_unifi_old_dump.py all_unifi_users.csv --commit --yes
+    railway run python scripts/import_unifi_old_dump.py all_unifi_users.csv --commit --placeholder-emails --yes
 """
 
 EXPECTED_COLUMNS = {"Name", "Email", "Company", "Suite", "Status"}
 PLACEHOLDER_DOMAIN = "placeholder.local"
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 @dataclass
@@ -39,15 +48,20 @@ class ImportSummary:
     rows_seen: int = 0
     rows_rejected: int = 0
     companies_created: int = 0
+    companies_reused: int = 0
     suites_created: int = 0
+    suites_reused: int = 0
     occupancies_created: int = 0
+    occupancies_reused: int = 0
     users_created: int = 0
     users_updated: int = 0
     users_skipped_blank_email: int = 0
+    users_skipped_invalid_email: int = 0
     assignments_created: int = 0
     assignments_updated: int = 0
     unifi_snapshots_created: int = 0
     unifi_snapshots_updated: int = 0
+    duplicate_emails: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -61,14 +75,23 @@ class OldDumpRow:
     suite_number: str
     status: str
     generated_placeholder: bool = False
+    email_valid: bool = False
 
 
 def normalize_whitespace(value: Any) -> str:
     return " ".join(str(value or "").strip().split())
 
 
+def normalize_lookup(value: str) -> str:
+    return normalize_whitespace(value).casefold()
+
+
 def normalize_email(value: Any) -> str:
     return normalize_whitespace(value).lower()
+
+
+def is_valid_email(value: str) -> bool:
+    return bool(value and EMAIL_RE.match(value))
 
 
 def normalize_status(value: Any) -> str:
@@ -110,17 +133,24 @@ def read_old_dump(path: Path, *, placeholder_emails: bool) -> tuple[list[OldDump
             if not name and not original_email:
                 warnings.append(f"Row {row_number}: rejected because both Name and Email are blank.")
                 continue
+
             company_name = normalize_whitespace(raw.get("Company"))
             suite_number = normalize_whitespace(raw.get("Suite"))
             if not company_name:
                 warnings.append(f"Row {row_number}: blank company.")
             if not suite_number:
                 warnings.append(f"Row {row_number}: blank suite.")
+
             generated_placeholder = False
             email = original_email
             if not email and placeholder_emails:
                 email = placeholder_email(name or "unknown", row_number)
                 generated_placeholder = True
+
+            email_valid = is_valid_email(email)
+            if email and not email_valid:
+                warnings.append(f"Row {row_number}: invalid email '{email}' skipped for local User creation.")
+
             rows.append(
                 OldDumpRow(
                     row_number=row_number,
@@ -130,6 +160,7 @@ def read_old_dump(path: Path, *, placeholder_emails: bool) -> tuple[list[OldDump
                     suite_number=suite_number,
                     status=normalize_status(raw.get("Status")),
                     generated_placeholder=generated_placeholder,
+                    email_valid=email_valid,
                 )
             )
     return rows, warnings
@@ -142,6 +173,9 @@ def import_old_dump(
     placeholder_emails: bool = False,
 ) -> ImportSummary:
     summary = ImportSummary(rows_seen=len(rows))
+    summary.duplicate_emails = sorted(
+        email for email, count in Counter(row.email for row in rows if row.email).items() if count > 1
+    )
 
     for row in rows:
         company = _get_or_create_company(session, row.company_name, summary) if row.company_name else None
@@ -150,10 +184,12 @@ def import_old_dump(
             _get_or_create_company_suite(session, company, suite, summary)
 
         user: User | None = None
-        if row.email:
+        if row.email_valid:
             user = _get_or_create_user(session, row, company, suite, summary)
             if suite:
                 _get_or_create_assignment(session, user, company, suite, summary)
+        elif row.email:
+            summary.users_skipped_invalid_email += 1
         else:
             summary.users_skipped_blank_email += 1
             if not placeholder_emails:
@@ -165,8 +201,10 @@ def import_old_dump(
 
 
 def _get_or_create_company(session: Session, name: str, summary: ImportSummary) -> Company:
-    company = session.scalar(select(Company).where(Company.name == name))
+    company = session.scalar(select(Company).where(func.lower(Company.name) == normalize_lookup(name)))
     if company:
+        company.status = "active"
+        summary.companies_reused += 1
         return company
     company = Company(name=name, legal_name=None, status="active", notes="Imported from old UniFi user dump.")
     session.add(company)
@@ -176,8 +214,10 @@ def _get_or_create_company(session: Session, name: str, summary: ImportSummary) 
 
 
 def _get_or_create_suite(session: Session, suite_number: str, summary: ImportSummary) -> Suite:
-    suite = session.scalar(select(Suite).where(Suite.suite_number == suite_number))
+    suite = session.scalar(select(Suite).where(func.lower(Suite.suite_number) == normalize_lookup(suite_number)))
     if suite:
+        suite.status = "active"
+        summary.suites_reused += 1
         return suite
     suite = Suite(suite_number=suite_number, status="active", description="Imported from old UniFi user dump.")
     session.add(suite)
@@ -192,6 +232,7 @@ def _get_or_create_company_suite(session: Session, company: Company, suite: Suit
     )
     if occupancy:
         occupancy.occupancy_status = "active"
+        summary.occupancies_reused += 1
         return occupancy
     occupancy = CompanySuite(
         company_id=company.id,
@@ -213,10 +254,11 @@ def _get_or_create_user(
     summary: ImportSummary,
 ) -> User:
     first_name, last_name = split_name(row.name or row.email)
-    user = session.scalar(select(User).where(User.email == row.email))
+    user = session.scalar(select(User).where(func.lower(User.email) == row.email.lower()))
     if user:
         user.first_name = first_name
         user.last_name = last_name
+        user.email = row.email
         user.company_id = company.id if company else None
         user.primary_suite_id = suite.id if suite else None
         user.status = row.status
@@ -272,8 +314,10 @@ def _get_or_create_assignment(
     if assignment:
         assignment.company_id = company.id if company else None
         assignment.active = True
+        assignment.end_date = None
         summary.assignments_updated += 1
         return assignment
+
     assignment = UserSuiteAssignment(
         user_id=user.id,
         suite_id=suite.id,
@@ -288,9 +332,8 @@ def _get_or_create_assignment(
 
 
 def _snapshot_id(row: OldDumpRow) -> str:
-    if row.email:
-        return f"old-dump-email-{row.email}"
-    return f"old-dump-row-{row.row_number}-{slugify(row.name)}"
+    identity = row.email or row.name or "blank"
+    return f"old-dump-row-{row.row_number}-{slugify(identity)}"
 
 
 def _get_or_create_unifi_snapshot(
@@ -340,21 +383,63 @@ def _get_or_create_unifi_snapshot(
     return snapshot
 
 
+def _safe_url(url: URL) -> str:
+    return url.render_as_string(hide_password=True)
+
+
+def database_identity(session: Session) -> dict[str, str]:
+    url = session.get_bind().url
+    return {
+        "driver": url.drivername,
+        "host": url.host or "local-file",
+        "database": url.database or "",
+        "url": _safe_url(url),
+    }
+
+
+def final_counts(session: Session) -> dict[str, int]:
+    return {
+        "companies": session.scalar(select(func.count()).select_from(Company)) or 0,
+        "suites": session.scalar(select(func.count()).select_from(Suite)) or 0,
+        "company_suites": session.scalar(select(func.count()).select_from(CompanySuite)) or 0,
+        "users": session.scalar(select(func.count()).select_from(User)) or 0,
+        "user_suite_assignments": session.scalar(select(func.count()).select_from(UserSuiteAssignment)) or 0,
+        "unifi_snapshots": session.scalar(select(func.count()).select_from(UnifiUser)) or 0,
+    }
+
+
+def print_database_identity(identity: dict[str, str]) -> None:
+    print("Connected database:")
+    print(f"- Driver: {identity['driver']}")
+    print(f"- Host: {identity['host']}")
+    print(f"- Database: {identity['database']}")
+    print(f"- URL: {identity['url']}")
+
+
 def print_summary(summary: ImportSummary, *, committed: bool) -> None:
     mode = "COMMIT" if committed else "DRY RUN"
     print(f"Old UniFi dump import summary ({mode})")
-    print(f"Rows seen: {summary.rows_seen}")
-    print(f"Rows rejected: {summary.rows_rejected}")
-    print(f"Companies created: {summary.companies_created}")
-    print(f"Suites created: {summary.suites_created}")
-    print(f"Company-suite occupancies created: {summary.occupancies_created}")
-    print(f"Users created: {summary.users_created}")
-    print(f"Users updated: {summary.users_updated}")
-    print(f"Users skipped due to blank email: {summary.users_skipped_blank_email}")
-    print(f"Assignments created: {summary.assignments_created}")
-    print(f"Assignments updated: {summary.assignments_updated}")
-    print(f"UniFi snapshots created: {summary.unifi_snapshots_created}")
-    print(f"UniFi snapshots updated: {summary.unifi_snapshots_updated}")
+    print(f"CSV rows read: {summary.rows_seen}")
+    print(f"Invalid/rejected rows: {summary.rows_rejected}")
+    print(f"Companies to create: {summary.companies_created}")
+    print(f"Companies reused: {summary.companies_reused}")
+    print(f"Suites to create: {summary.suites_created}")
+    print(f"Suites reused: {summary.suites_reused}")
+    print(f"Company-suite relationships to create: {summary.occupancies_created}")
+    print(f"Company-suite relationships reused: {summary.occupancies_reused}")
+    print(f"Users to create: {summary.users_created}")
+    print(f"Users to update: {summary.users_updated}")
+    print(f"Users to skip due to blank email: {summary.users_skipped_blank_email}")
+    print(f"Users to skip due to invalid email: {summary.users_skipped_invalid_email}")
+    print(f"Assignments to create: {summary.assignments_created}")
+    print(f"Assignments to update: {summary.assignments_updated}")
+    print(f"UniFi/import snapshots to create: {summary.unifi_snapshots_created}")
+    print(f"UniFi/import snapshots to update: {summary.unifi_snapshots_updated}")
+    print(f"Blank-email rows: {summary.users_skipped_blank_email}")
+    print(f"Duplicate emails: {len(summary.duplicate_emails)}")
+    if summary.duplicate_emails:
+        for email in summary.duplicate_emails:
+            print(f"- duplicate email: {email}")
     if summary.warnings:
         print("\nWarnings:")
         for warning in summary.warnings:
@@ -367,16 +452,34 @@ def print_summary(summary: ImportSummary, *, committed: bool) -> None:
         print("\nDry run only. Re-run with --commit to write changes.")
 
 
+def print_final_counts(counts: dict[str, int]) -> None:
+    print("\nFinal database counts:")
+    for name, count in counts.items():
+        print(f"- {name}: {count}")
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Safely import an old UniFi all_unifi_users.csv dump.")
     parser.add_argument("csv_path", type=Path, help="Path to all_unifi_users.csv")
+    parser.add_argument("--dry-run", action="store_true", help="Preview changes and roll back. This is the default.")
     parser.add_argument("--commit", action="store_true", help="Write changes. Default is dry-run.")
+    parser.add_argument("--yes", action="store_true", help="Skip interactive confirmation for noninteractive Railway runs.")
     parser.add_argument(
         "--placeholder-emails",
         action="store_true",
         help=f"Create local Users for blank-email rows using deterministic @{PLACEHOLDER_DOMAIN} addresses.",
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.dry_run and args.commit:
+        parser.error("--dry-run and --commit cannot be used together")
+    return args
+
+
+def confirm_commit(*, yes: bool) -> bool:
+    if yes:
+        return True
+    response = input("Type 'yes' to commit these changes to the connected database: ").strip().lower()
+    return response == "yes"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -385,18 +488,29 @@ def main(argv: list[str] | None = None) -> int:
         print(f"CSV file not found: {args.csv_path}", file=sys.stderr)
         return 2
 
-    init_db()
-    rows, warnings = read_old_dump(args.csv_path, placeholder_emails=args.placeholder_emails)
-    with SessionLocal() as session:
-        summary = import_old_dump(session, rows, placeholder_emails=args.placeholder_emails)
-        summary.warnings = warnings + summary.warnings
-        summary.rows_rejected = len([warning for warning in warnings if "rejected" in warning])
-        if args.commit:
-            session.commit()
-        else:
-            session.rollback()
-        print_summary(summary, committed=args.commit)
-    return 0 if not summary.errors else 1
+    try:
+        init_db()
+        rows, warnings = read_old_dump(args.csv_path, placeholder_emails=args.placeholder_emails)
+        with SessionLocal() as session:
+            summary = import_old_dump(session, rows, placeholder_emails=args.placeholder_emails)
+            summary.warnings = warnings + summary.warnings
+            summary.rows_rejected = len([warning for warning in warnings if "rejected" in warning])
+            print_database_identity(database_identity(session))
+            print_summary(summary, committed=args.commit)
+
+            if args.commit:
+                if not confirm_commit(yes=args.yes):
+                    session.rollback()
+                    print("Commit cancelled. No changes were written.")
+                    return 3
+                session.commit()
+                print_final_counts(final_counts(session))
+            else:
+                session.rollback()
+            return 0 if not summary.errors else 1
+    except Exception as exc:
+        print(f"Import failed; transaction rolled back: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
