@@ -158,6 +158,58 @@ def test_json_api_request_login_and_approval_flow(app_context):
         assert audit_log is not None
 
 
+def test_json_api_users_returns_dashboard_field_contract(app_context):
+    client, session_factory, _ = app_context
+    create_admin_and_login(client)
+
+    with session_factory() as session:
+        from app.models import Company, Suite, UnifiUser, User
+
+        company = Company(name="1205 Tenant")
+        suite = Suite(suite_number="1205")
+        session.add_all([company, suite])
+        session.flush()
+        user = User(
+            first_name="Ada",
+            last_name="Lovelace",
+            email="ada@example.com",
+            company_id=company.id,
+            primary_suite_id=suite.id,
+            status="active",
+            desired_unifi_access_policy_names=["After Hours"],
+            desired_unifi_user_group_names=["Tenant Staff"],
+        )
+        session.add(user)
+        session.flush()
+        session.add(
+            UnifiUser(
+                local_user_id=user.id,
+                unifi_user_id="u-ada",
+                email="ada@example.com",
+                status="active",
+                access_policy_names=["Front Door"],
+                group_names=["Employees"],
+            )
+        )
+        session.commit()
+
+    response = client.get("/api/admin/users")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["meta"]["total_users"] == 1
+    assert payload["meta"]["filters"] == {}
+    row = payload["users"][0]
+    assert row["name"] == "Ada Lovelace"
+    assert row["email"] == "ada@example.com"
+    assert row["company"]["name"] == "1205 Tenant"
+    assert row["suite"]["suite_number"] == "1205"
+    assert row["status"] == "active"
+    assert row["desired_unifi_access_policy_names"] == ["After Hours"]
+    assert row["desired_unifi_user_group_names"] == ["Tenant Staff"]
+    assert row["current_unifi_access_policy_names"] == ["Front Door"]
+    assert row["current_unifi_user_group_names"] == ["Employees"]
+
+
 def test_report_generation_email_preview_and_verification(app_context):
     client, session_factory, export_dir = app_context
     create_admin_and_login(client)

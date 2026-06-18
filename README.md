@@ -160,6 +160,34 @@ DATABASE_URL="$RAILWAY_DATABASE_URL" python scripts/import_unifi_old_dump.py all
 
 Never commit `.env` files or database secrets. Run the dry run against production before committing, and confirm the printed host/database are the intended Railway database.
 
+## Diagnose Empty Users Dashboard
+
+The new dashboard Users page reads local registry `users` records from:
+
+```text
+frontend /dashboard/users
+  -> Next.js /api/backend/admin/users
+  -> FastAPI /api/admin/users
+  -> users table joined through ORM relationships to companies, suites, access profiles, and linked unifi_users snapshots
+```
+
+There is no `buildingId`, `tenantId`, `organizationId`, source, or status filter on the Users API. This app currently models 1205 on Franklin as a single-property registry database. If the dashboard shows no users, first confirm that the Railway database actually contains local `users` rows:
+
+```bash
+railway run python scripts/diagnose_users.py
+```
+
+The diagnostic command is read-only. It prints the connected database host/name with credentials hidden, Alembic version rows, counts for companies, suites, company_suites, users, user_suite_assignments, and unifi snapshots, plus a small sample of users.
+
+If `unifi snapshots` is greater than zero but `users` is zero, reconciliation has only stored read-only UniFi snapshots. Promote snapshots through the bootstrap review flow, or import the old dump:
+
+```bash
+railway run python scripts/import_unifi_old_dump.py all_unifi_users.csv --dry-run
+railway run python scripts/import_unifi_old_dump.py all_unifi_users.csv --commit --yes
+```
+
+If `users` is greater than zero but the dashboard is empty, check Railway logs for `admin users fetch` from FastAPI and `ENTRY POINT users proxy fetch` from Next.js. Those log lines show whether the frontend reached the correct endpoint, the upstream status, the database host/name, how many users were found, and that no filters were applied.
+
 ## UI and Dark Mode
 
 The admin UI uses reusable CSS utilities for cards, badges, buttons, responsive tables, alerts, and changed-field diffs. A theme toggle in the base layout stores `light` or `dark` in browser `localStorage`; first visit respects the system `prefers-color-scheme` setting. No backend preference or frontend build chain is required.

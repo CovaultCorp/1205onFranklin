@@ -783,6 +783,31 @@ Show:
 * Current `ENABLE_WRITES` mode
 * Current `ENABLE_EMAIL` mode
 
+## Dashboard user list data flow
+
+The Next.js dashboard Users page must display local registry `User` records from the production database used by the FastAPI API layer.
+
+Flow:
+
+```text
+frontend /dashboard/users
+  -> Next.js /api/backend/admin/users
+  -> FastAPI /api/admin/users
+  -> SQLAlchemy User model backed by the users table
+```
+
+Rules:
+
+* The Users API returns all local registry users ordered by last name and first name.
+* The Users API must not filter by `buildingId`, `tenantId`, `organizationId`, source, or status unless a future task explicitly adds those filters.
+* 1205 on Franklin is represented by the configured single-property registry database, not by a building/property foreign key.
+* Frontend rows expect `name`, `email`, `company`, `suite`, `status`, `last_verified_at`, and access policy/group names when available.
+* Backend rows include company and suite objects from local relationships and access policy/group names from local desired fields plus linked `UnifiUser` snapshots when available.
+* Read-only UniFi reconciliation stores `UnifiUser` snapshots only; it does not automatically create local `User` records.
+* Local `User` records are created by committed bootstrap import batches, approved local workflows, or the production-safe old-dump importer.
+* The Users API and Next.js proxy should log safe diagnostics for the user fetch path, including user counts, active filters, and database host/name without credentials.
+* `scripts/diagnose_users.py` is the read-only production diagnostic command for checking Railway database counts and migration state.
+
 ## Required routes
 
 Requester:
