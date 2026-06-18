@@ -348,6 +348,7 @@ def _user_json(user: User, snapshot: UnifiUser | None = None) -> dict[str, Any]:
         "employee_number": user.employee_number,
         "company": _company_json(user.company),
         "suite": _suite_json(user.primary_suite),
+        "property": _property_json(user.property),
         "access_profile": _profile_json(user.access_profile),
         "department": user.department,
         "status": user.status,
@@ -454,6 +455,168 @@ def session_status(
     }
 
 
+@router.post("/agent/snapshots", status_code=status.HTTP_202_ACCEPTED)
+def api_agent_snapshots(
+    payload: AgentSnapshotIn,
+    session: Session = Depends(get_session),
+    _: None = Depends(_require_agent_token),
+):
+    property_ = _entrypoint_property(session)
+    settings = get_settings()
+    now = utcnow()
+    observed_at = payload.observed_at or now
+    run = SyncRun(
+        property_id=property_.id,
+        source=payload.source or settings.unifi_snapshot_source,
+        agent_name=payload.agent_name or settings.unifi_agent_name,
+        status="received",
+        started_at=now,
+        observed_at=observed_at,
+        summary_json={},
+    )
+    session.add(run)
+    session.flush()
+
+    counts = {
+        "users_seen": len(payload.users),
+        "users_upserted": 0,
+        "access_policies_upserted": 0,
+        "user_groups_upserted": 0,
+        "doors_upserted": 0,
+        "door_groups_upserted": 0,
+        "snapshots_stored": 0,
+    }
+
+    for user_payload in payload.users:
+        snapshot = _upsert_agent_unifi_user(session, property_id=property_.id, payload=user_payload, now=now)
+        normalized = normalize_unifi_user(user_payload)
+        session.add(
+            SyncSnapshot(
+                property_id=property_.id,
+                sync_run_id=run.id,
+                snapshot_type="unifi_user",
+                external_id=normalized["id"] or None,
+                normalized_json=normalized,
+                raw_snapshot_json=sanitize_for_snapshot(user_payload),
+                observed_at=observed_at,
+            )
+        )
+        counts["snapshots_stored"] += 1
+        if snapshot is not None:
+            counts["users_upserted"] += 1
+
+    for policy_payload in payload.access_policies:
+        record = _upsert_named_unifi_record(
+            session,
+            model=UnifiAccessPolicy,
+            id_field="unifi_policy_id",
+            property_id=property_.id,
+            payload=policy_payload,
+            now=now,
+        )
+        session.add(
+            SyncSnapshot(
+                property_id=property_.id,
+                sync_run_id=run.id,
+                snapshot_type="unifi_access_policy",
+                external_id=_payload_id(policy_payload, ("id", "uuid", "policy_id", "policyId")),
+                normalized_json={"id": _payload_id(policy_payload, ("id", "uuid", "policy_id", "policyId")), "name": _payload_text(policy_payload, "name", "policyName")},
+                raw_snapshot_json=sanitize_for_snapshot(policy_payload),
+                observed_at=observed_at,
+            )
+        )
+        counts["snapshots_stored"] += 1
+        if record is not None:
+            counts["access_policies_upserted"] += 1
+
+    for group_payload in payload.user_groups:
+        record = _upsert_named_unifi_record(
+            session,
+            model=UnifiUserGroup,
+            id_field="unifi_group_id",
+            property_id=property_.id,
+            payload=group_payload,
+            now=now,
+        )
+        session.add(
+            SyncSnapshot(
+                property_id=property_.id,
+                sync_run_id=run.id,
+                snapshot_type="unifi_user_group",
+                external_id=_payload_id(group_payload, ("id", "uuid", "group_id", "groupId")),
+                normalized_json={"id": _payload_id(group_payload, ("id", "uuid", "group_id", "groupId")), "name": _payload_text(group_payload, "name", "groupName")},
+                raw_snapshot_json=sanitize_for_snapshot(group_payload),
+                observed_at=observed_at,
+            )
+        )
+        counts["snapshots_stored"] += 1
+        if record is not None:
+            counts["user_groups_upserted"] += 1
+
+    door_groups_by_unifi_id: dict[str, UnifiDoorGroup] = {}
+    for door_group_payload in payload.door_groups:
+        record = _upsert_named_unifi_record(
+            session,
+            model=UnifiDoorGroup,
+            id_field="unifi_door_group_id",
+            property_id=property_.id,
+            payload=door_group_payload,
+            now=now,
+        )
+        external_id = _payload_id(door_group_payload, ("id", "uuid", "door_group_id", "doorGroupId"))
+        if record is not None and external_id:
+            door_groups_by_unifi_id[external_id] = record
+        session.add(
+            SyncSnapshot(
+                property_id=property_.id,
+                sync_run_id=run.id,
+                snapshot_type="unifi_door_group",
+                external_id=external_id,
+                normalized_json={"id": external_id, "name": _payload_text(door_group_payload, "name")},
+                raw_snapshot_json=sanitize_for_snapshot(door_group_payload),
+                observed_at=observed_at,
+            )
+        )
+        counts["snapshots_stored"] += 1
+        if record is not None:
+            counts["door_groups_upserted"] += 1
+
+    for door_payload in payload.doors:
+        record = _upsert_named_unifi_record(
+            session,
+            model=UnifiDoor,
+            id_field="unifi_door_id",
+            property_id=property_.id,
+            payload=door_payload,
+            now=now,
+        )
+        door_group_unifi_id = _payload_id(door_payload, ("door_group_id", "doorGroupId"))
+        if record is not None and door_group_unifi_id in door_groups_by_unifi_id:
+            record.door_group_id = door_groups_by_unifi_id[door_group_unifi_id].id
+        external_id = _payload_id(door_payload, ("id", "uuid", "door_id", "doorId"))
+        session.add(
+            SyncSnapshot(
+                property_id=property_.id,
+                sync_run_id=run.id,
+                snapshot_type="unifi_door",
+                external_id=external_id,
+                normalized_json={"id": external_id, "name": _payload_text(door_payload, "name"), "status": _payload_text(door_payload, "status", "state")},
+                raw_snapshot_json=sanitize_for_snapshot(door_payload),
+                observed_at=observed_at,
+            )
+        )
+        counts["snapshots_stored"] += 1
+        if record is not None:
+            counts["doors_upserted"] += 1
+
+    run.status = "succeeded"
+    run.completed_at = utcnow()
+    run.summary_json = counts
+    session.add(SyncRunLog(sync_run_id=run.id, level="info", message="Agent snapshot accepted", context_json=counts))
+    session.commit()
+    return {"sync_run": {"id": run.id, "status": run.status, "summary": counts}, "property": _property_json(property_)}
+
+
 @router.post("/auth/login")
 def api_login(payload: LoginIn, response: Response, session: Session = Depends(get_session)):
     account = session.scalar(
@@ -483,7 +646,9 @@ def api_submit_access_request(
     request: Request,
     session: Session = Depends(get_session),
 ):
+    property_ = _entrypoint_property(session)
     access_request = AccessRequest(
+        property_id=property_.id,
         request_type=payload.request_type,
         requested_for_first_name=payload.requested_for_first_name,
         requested_for_last_name=payload.requested_for_last_name,
@@ -519,6 +684,7 @@ def api_admin_dashboard(
     account: PortalAccount = Depends(_require_api_admin),
 ):
     stale_cutoff = utcnow() - timedelta(days=90)
+    property_ = _entrypoint_property(session)
     stats = {
         "active_users": session.scalar(select(func.count(User.id)).where(User.status == "active")) or 0,
         "missing_company": session.scalar(select(func.count(User.id)).where(User.company_id.is_(None))) or 0,
@@ -537,6 +703,11 @@ def api_admin_dashboard(
         "open_conflicts": session.scalar(select(func.count(Conflict.id)).where(Conflict.status == "open")) or 0,
         "sync_failures": session.scalar(select(func.count(SyncJob.id)).where(SyncJob.status == "failed")) or 0,
         "unifi_snapshots": session.scalar(select(func.count(UnifiUser.id))) or 0,
+        "unifi_access_policies": session.scalar(select(func.count(UnifiAccessPolicy.id))) or 0,
+        "unifi_user_groups": session.scalar(select(func.count(UnifiUserGroup.id))) or 0,
+        "unifi_doors": session.scalar(select(func.count(UnifiDoor.id))) or 0,
+        "sync_runs": session.scalar(select(func.count(SyncRun.id))) or 0,
+        "staged_access_changes": session.scalar(select(func.count(StagedAccessChange.id))) or 0,
         "unmatched_unifi_snapshots": session.scalar(
             select(func.count(UnifiUser.id)).where(UnifiUser.local_user_id.is_(None))
         )
@@ -544,6 +715,7 @@ def api_admin_dashboard(
     }
     return {
         "account": _account_json(account),
+        "property": _property_json(property_),
         "stats": stats,
         "recent_requests": [
             _request_json(access_request)
@@ -617,7 +789,9 @@ def api_approve_request(
     access_request = session.get(AccessRequest, request_id)
     if access_request is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Access request not found")
+    property_ = _entrypoint_property(session)
     before = {"status": access_request.status}
+    access_request.property_id = access_request.property_id or property_.id
     access_request.requested_for_company_id = payload.requested_for_company_id
     access_request.requested_for_suite_id = payload.requested_for_suite_id
     access_request.requested_access_profile_id = payload.requested_access_profile_id
@@ -626,6 +800,7 @@ def api_approve_request(
     access_request.approved_by_account_id = account.id
     access_request.approved_at = utcnow()
     job = SyncJob(
+        property_id=property_.id,
         access_request_id=access_request.id,
         job_type="dry_run",
         status="pending",
@@ -637,6 +812,27 @@ def api_approve_request(
         },
     )
     session.add(job)
+    session.flush()
+    session.add(
+        StagedAccessChange(
+            property_id=property_.id,
+            sync_job_id=job.id,
+            access_request_id=access_request.id,
+            local_user_id=access_request.requested_for_user_id,
+            unifi_user_id=None,
+            change_type=access_request.request_type,
+            status="staged",
+            proposed_before_json=None,
+            proposed_after_json={
+                "request_id": access_request.id,
+                "email": access_request.requested_for_email,
+                "company_id": access_request.requested_for_company_id,
+                "suite_id": access_request.requested_for_suite_id,
+                "access_profile_id": access_request.requested_access_profile_id,
+                "dry_run": True,
+            },
+        )
+    )
     audit(
         session,
         action="access_request.approved",

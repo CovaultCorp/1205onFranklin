@@ -5,11 +5,12 @@ from datetime import date
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.audit import audit
 from app.db import get_session
-from app.models import AccessRequest
+from app.models import AccessRequest, BuildingProperty
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -17,6 +18,24 @@ templates = Jinja2Templates(directory="app/templates")
 
 def _date_or_none(value: str | None) -> date | None:
     return date.fromisoformat(value) if value else None
+
+
+def _entrypoint_property(session: Session) -> BuildingProperty:
+    property_ = session.scalar(select(BuildingProperty).where(BuildingProperty.slug == "1205-franklin"))
+    if property_ is None:
+        property_ = BuildingProperty(
+            slug="1205-franklin",
+            name="ENTRY POINT",
+            display_name="1205 on Franklin",
+            address_line1="1205 Franklin",
+            city="Tampa",
+            state="FL",
+            status="active",
+            notes="Seed property for Entry Point at 1205 on Franklin.",
+        )
+        session.add(property_)
+        session.flush()
+    return property_
 
 
 @router.get("/request", response_class=HTMLResponse)
@@ -42,7 +61,9 @@ def submit_request(
     requester_email: str = Form(...),
     session: Session = Depends(get_session),
 ):
+    property_ = _entrypoint_property(session)
     access_request = AccessRequest(
+        property_id=property_.id,
         request_type=request_type,
         requested_for_first_name=requested_for_first_name,
         requested_for_last_name=requested_for_last_name,

@@ -18,6 +18,18 @@ export type Lookup = {
   status?: string;
 };
 
+export type Property = {
+  id: number;
+  slug: string;
+  name: string;
+  display_name: string;
+  address_line1: string;
+  city?: string | null;
+  state?: string | null;
+  postal_code?: string | null;
+  status: string;
+};
+
 export type AccessRequest = {
   id: number;
   request_type: string;
@@ -39,6 +51,7 @@ export type User = {
   employee_number?: string | null;
   company?: Lookup | null;
   suite?: Lookup | null;
+  property?: Property | null;
   access_profile?: Lookup | null;
   department?: string | null;
   status: string;
@@ -121,6 +134,7 @@ export type AuditLog = {
 };
 
 export type DashboardData = {
+  property?: Property | null;
   stats: Record<string, number>;
   recent_requests: AccessRequest[];
   recent_conflicts: Conflict[];

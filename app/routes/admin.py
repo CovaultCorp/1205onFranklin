@@ -14,6 +14,7 @@ from app.import_export import build_bootstrap_reference_zip, commit_import_batch
 from app.models import (
     AccessProfile,
     AccessRequest,
+    BuildingProperty,
     Company,
     CompanySuite,
     Conflict,
@@ -23,6 +24,7 @@ from app.models import (
     ReportRun,
     Suite,
     SyncJob,
+    StagedAccessChange,
     UnifiUser,
     User,
     UserSuiteAssignment,
@@ -53,6 +55,24 @@ def _optional_int(value: str | int | None) -> int | None:
 
 def _date_or_none(value: str | None) -> date | None:
     return date.fromisoformat(value) if value else None
+
+
+def _entrypoint_property(session: Session) -> BuildingProperty:
+    property_ = session.scalar(select(BuildingProperty).where(BuildingProperty.slug == "1205-franklin"))
+    if property_ is None:
+        property_ = BuildingProperty(
+            slug="1205-franklin",
+            name="ENTRY POINT",
+            display_name="1205 on Franklin",
+            address_line1="1205 Franklin",
+            city="Tampa",
+            state="FL",
+            status="active",
+            notes="Seed property for Entry Point at 1205 on Franklin.",
+        )
+        session.add(property_)
+        session.flush()
+    return property_
 
 
 @router.get("", response_class=HTMLResponse)
@@ -133,7 +153,9 @@ def approve_request(
     access_request = session.get(AccessRequest, request_id)
     if access_request is None:
         return RedirectResponse("/admin/requests", status_code=303)
+    property_ = _entrypoint_property(session)
     before = {"status": access_request.status}
+    access_request.property_id = access_request.property_id or property_.id
     access_request.requested_for_company_id = requested_for_company_id
     access_request.requested_for_suite_id = requested_for_suite_id
     access_request.requested_access_profile_id = requested_access_profile_id
@@ -142,6 +164,7 @@ def approve_request(
     access_request.approved_by_account_id = account.id
     access_request.approved_at = utcnow()
     job = SyncJob(
+        property_id=property_.id,
         access_request_id=access_request.id,
         job_type="dry_run",
         status="pending",
@@ -153,6 +176,25 @@ def approve_request(
         },
     )
     session.add(job)
+    session.flush()
+    session.add(
+        StagedAccessChange(
+            property_id=property_.id,
+            sync_job_id=job.id,
+            access_request_id=access_request.id,
+            local_user_id=access_request.requested_for_user_id,
+            change_type=access_request.request_type,
+            status="staged",
+            proposed_after_json={
+                "request_id": access_request.id,
+                "email": access_request.requested_for_email,
+                "company_id": access_request.requested_for_company_id,
+                "suite_id": access_request.requested_for_suite_id,
+                "access_profile_id": access_request.requested_access_profile_id,
+                "dry_run": True,
+            },
+        )
+    )
     audit(
         session,
         action="access_request.approved",
@@ -412,7 +454,8 @@ def companies(request: Request, session: Session = Depends(get_session), account
 
 @router.post("/companies")
 def create_company(name: str = Form(...), legal_name: str = Form(""), primary_contact_email: str = Form(""), session: Session = Depends(get_session), account: PortalAccount = Depends(require_admin)):
-    session.add(Company(name=name, legal_name=legal_name or None, primary_contact_email=primary_contact_email or None))
+    property_ = _entrypoint_property(session)
+    session.add(Company(property_id=property_.id, name=name, legal_name=legal_name or None, primary_contact_email=primary_contact_email or None))
     session.commit()
     return RedirectResponse("/admin/companies", status_code=303)
 
@@ -435,7 +478,8 @@ def suites(request: Request, session: Session = Depends(get_session), account: P
 
 @router.post("/suites")
 def create_suite(suite_number: str = Form(...), floor: str = Form(""), building_area: str = Form(""), session: Session = Depends(get_session), account: PortalAccount = Depends(require_admin)):
-    session.add(Suite(suite_number=suite_number, floor=floor or None, building_area=building_area or None))
+    property_ = _entrypoint_property(session)
+    session.add(Suite(property_id=property_.id, suite_number=suite_number, floor=floor or None, building_area=building_area or None))
     session.commit()
     return RedirectResponse("/admin/suites", status_code=303)
 
@@ -466,7 +510,8 @@ def company_suites(request: Request, session: Session = Depends(get_session), ac
 
 @router.post("/company-suites")
 def create_company_suite(company_id: int = Form(...), suite_id: int = Form(...), occupancy_status: str = Form("active"), session: Session = Depends(get_session), account: PortalAccount = Depends(require_admin)):
-    session.add(CompanySuite(company_id=company_id, suite_id=suite_id, occupancy_status=occupancy_status))
+    property_ = _entrypoint_property(session)
+    session.add(CompanySuite(property_id=property_.id, company_id=company_id, suite_id=suite_id, occupancy_status=occupancy_status))
     session.commit()
     return RedirectResponse("/admin/company-suites", status_code=303)
 
@@ -478,7 +523,8 @@ def access_profiles(request: Request, session: Session = Depends(get_session), a
 
 @router.post("/access-profiles")
 def create_access_profile(name: str = Form(...), description: str = Form(""), unifi_access_policy_ids: str = Form(""), unifi_user_group_ids: str = Form(""), session: Session = Depends(get_session), account: PortalAccount = Depends(require_admin)):
-    session.add(AccessProfile(name=name, description=description or None, unifi_access_policy_ids=_csv_ids(unifi_access_policy_ids), unifi_user_group_ids=_csv_ids(unifi_user_group_ids)))
+    property_ = _entrypoint_property(session)
+    session.add(AccessProfile(property_id=property_.id, name=name, description=description or None, unifi_access_policy_ids=_csv_ids(unifi_access_policy_ids), unifi_user_group_ids=_csv_ids(unifi_user_group_ids)))
     session.commit()
     return RedirectResponse("/admin/access-profiles", status_code=303)
 
