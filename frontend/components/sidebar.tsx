@@ -8,12 +8,10 @@ import {
   DatabaseZap,
   DoorOpen,
   FileClock,
-  FileStack,
   FileText,
   Gauge,
   Layers3,
   LogOut,
-  Send,
   Settings,
   ShieldCheck,
   Users
@@ -24,10 +22,6 @@ import { logout } from "@/services/auth";
 import { ThemeToggle } from "./theme-toggle";
 
 const groups = [
-  {
-    label: "Dashboard",
-    items: [{ href: "/dashboard", label: "Overview", icon: Gauge }]
-  },
   {
     label: "Access Management",
     items: [
@@ -48,8 +42,7 @@ const groups = [
     label: "Operations",
     items: [
       { href: "/dashboard/conflicts", label: "Conflicts", icon: AlertTriangle },
-      { href: "/dashboard/sync-jobs", label: "Sync Jobs", icon: DatabaseZap },
-      { href: "/dashboard/bootstrap", label: "Bootstrap Users", icon: FileStack }
+      { href: "/dashboard/sync-jobs", label: "Sync Jobs", icon: DatabaseZap }
     ]
   },
   {
@@ -57,13 +50,6 @@ const groups = [
     items: [
       { href: "/dashboard/reports", label: "Reports", icon: FileText },
       { href: "/dashboard/audit-log", label: "Audit Log", icon: FileClock }
-    ]
-  },
-  {
-    label: "System",
-    items: [
-      { href: "/dashboard/settings", label: "Settings", icon: Settings },
-      { href: "/request-access", label: "Request Access", icon: Send }
     ]
   }
 ];
@@ -79,19 +65,23 @@ export function Sidebar() {
 
   return (
     <aside className="sidebar">
-      <div className="flex items-center justify-between gap-3">
+      <div className="sidebar-brand">
         <Link href="/dashboard" className="flex min-w-0 items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary text-white">
+          <div className="brand-mark">
             <ShieldCheck size={22} />
           </div>
           <div className="min-w-0">
-            <div className="truncate text-base font-bold leading-tight">Building Access Registry</div>
-            <div className="text-xs text-default-500">UniFi sync control</div>
+            <div className="truncate text-sm font-bold leading-tight">Building Access Registry</div>
+            <div className="mt-0.5 text-xs text-default-500">Access operations</div>
           </div>
         </Link>
         <ThemeToggle />
       </div>
       <Divider className="my-5" />
+      <Link href="/dashboard" className={`nav-item nav-overview ${pathname === "/dashboard" ? "active" : ""}`}>
+        <Gauge size={18} />
+        <span className="truncate text-sm font-semibold">Dashboard</span>
+      </Link>
       <nav className="nav-list">
         {groups.map((group) => (
           <div key={group.label}>
@@ -111,6 +101,15 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
+      <Divider className="my-5" />
+      <Link href="/dashboard/bootstrap" className={`nav-item ${pathname.startsWith("/dashboard/bootstrap") ? "active" : ""}`}>
+        <DatabaseZap size={18} />
+        <span className="truncate text-sm font-semibold">Bootstrap Users</span>
+      </Link>
+      <Link href="/dashboard/settings" className={`nav-item ${pathname.startsWith("/dashboard/settings") ? "active" : ""}`}>
+        <Settings size={18} />
+        <span className="truncate text-sm font-semibold">Settings</span>
+      </Link>
       <div className="mt-6">
         <Button fullWidth variant="flat" startContent={<LogOut size={17} />} onPress={handleLogout}>
           Log out
