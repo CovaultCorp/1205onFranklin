@@ -1,11 +1,9 @@
 "use client";
 
-import { Button, Card, CardBody, Divider, Input } from "@heroui/react";
-import { LockKeyhole, Mail } from "lucide-react";
+import { Button, Input } from "@heroui/react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { login } from "@/services/auth";
-import { ThemeToggle } from "@/components/theme-toggle";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -29,59 +27,45 @@ export default function LoginPage() {
 
   return (
     <main className="login-shell">
-      <div className="login-theme-toggle">
-        <ThemeToggle />
-      </div>
-
       <section className="login-card-wrap" aria-labelledby="login-title">
-        <Card className="login-card" radius="lg" shadow="sm">
-          <CardBody className="login-card-body">
-            <div className="login-heading">
-              <p className="login-brand">ENTRY POINT</p>
-              <h1 id="login-title">Building Access &amp; Tenant Management</h1>
-              <p>Manage tenant access, permissions, and building security for 1205 on Franklin.</p>
-            </div>
+        <div className="login-card">
+          <div className="login-heading">
+            <p className="login-brand">ENTRY POINT</p>
+            <h1 id="login-title">Building Access &amp; Tenant Management</h1>
+            <p>Manage tenant access, permissions, and building security for 1205 on Franklin.</p>
+          </div>
 
-            <Divider className="login-divider" />
-
-            <form className="login-form" onSubmit={submit}>
-              <Input
-                name="email"
-                label="Email"
-                type="email"
-                autoComplete="email"
-                variant="bordered"
-                labelPlacement="outside"
-                placeholder="Email"
-                size="lg"
-                isRequired
-                startContent={<Mail aria-hidden="true" className="login-input-icon" size={17} />}
-              />
-              <Input
-                name="password"
-                label="Password"
-                type="password"
-                autoComplete="current-password"
-                variant="bordered"
-                labelPlacement="outside"
-                placeholder="Password"
-                size="lg"
-                isRequired
-                startContent={<LockKeyhole aria-hidden="true" className="login-input-icon" size={17} />}
-              />
-              {error ? (
-                <div className="login-alert" role="alert">
-                  {error}
-                </div>
-              ) : null}
-              <Button className="login-submit" type="submit" size="lg" fullWidth isLoading={loading}>
-                Sign In
-              </Button>
-            </form>
-
-            <p className="login-helper">Authorized building operations users only.</p>
-          </CardBody>
-        </Card>
+          <form className="login-form" onSubmit={submit}>
+            <Input
+              name="email"
+              aria-label="Email"
+              type="email"
+              autoComplete="email"
+              variant="bordered"
+              placeholder="Email"
+              size="lg"
+              isRequired
+            />
+            <Input
+              name="password"
+              aria-label="Password"
+              type="password"
+              autoComplete="current-password"
+              variant="bordered"
+              placeholder="Password"
+              size="lg"
+              isRequired
+            />
+            {error ? (
+              <div className="login-alert" role="alert">
+                {error}
+              </div>
+            ) : null}
+            <Button className="login-submit" type="submit" size="lg" fullWidth isLoading={loading}>
+              Sign In
+            </Button>
+          </form>
+        </div>
       </section>
     </main>
   );
