@@ -1,6 +1,7 @@
 "use client";
 
-import { Button, Card, CardBody, Input } from "@heroui/react";
+import { Button, Card, CardBody, Divider, Input } from "@heroui/react";
+import { LockKeyhole, Mail, ShieldCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { BrandLogo } from "@/components/brand-logo";
@@ -28,29 +29,64 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-5 py-10">
-      <div className="absolute right-5 top-5">
+    <main className="login-shell">
+      <div className="login-theme-toggle">
         <ThemeToggle />
       </div>
-      <Card className="w-full max-w-md" radius="sm">
-        <CardBody className="gap-6 p-8">
-          <div className="grid justify-items-start gap-4">
-            <BrandLogo href="" size="auth" />
-            <div>
-              <h1 className="text-2xl font-bold">Admin login</h1>
-              <p className="text-sm text-default-500">Access operations dashboard</p>
+
+      <section className="login-card-wrap" aria-labelledby="login-title">
+        <div className="login-logo">
+          <BrandLogo href="" size="auth" />
+        </div>
+
+        <Card className="login-card" radius="sm" shadow="sm">
+          <CardBody className="login-card-body">
+            <div className="login-heading">
+              <div className="login-icon" aria-hidden="true">
+                <ShieldCheck size={20} />
+              </div>
+              <div>
+                <p className="login-eyebrow">Secure dashboard access</p>
+                <h1 id="login-title">Building Access Registry</h1>
+                <p>Sign in to manage 1205 on Franklin access records.</p>
+              </div>
             </div>
-          </div>
-          <form className="grid gap-4" onSubmit={submit}>
-            <Input name="email" label="Email" type="email" isRequired />
-            <Input name="password" label="Password" type="password" isRequired />
-            {error ? <p className="text-sm text-danger">{error}</p> : null}
-            <Button color="primary" type="submit" isLoading={loading}>
-              Sign in
-            </Button>
-          </form>
-        </CardBody>
-      </Card>
+
+            <Divider className="login-divider" />
+
+            <form className="login-form" onSubmit={submit}>
+              <Input
+                name="email"
+                label="Email"
+                type="email"
+                autoComplete="email"
+                variant="bordered"
+                isRequired
+                startContent={<Mail aria-hidden="true" className="login-input-icon" size={17} />}
+              />
+              <Input
+                name="password"
+                label="Password"
+                type="password"
+                autoComplete="current-password"
+                variant="bordered"
+                isRequired
+                startContent={<LockKeyhole aria-hidden="true" className="login-input-icon" size={17} />}
+              />
+              {error ? (
+                <div className="login-alert" role="alert">
+                  {error}
+                </div>
+              ) : null}
+              <Button className="login-submit" type="submit" isLoading={loading}>
+                Sign In
+              </Button>
+            </form>
+
+            <p className="login-helper">Authorized building operations users only.</p>
+          </CardBody>
+        </Card>
+      </section>
     </main>
   );
 }
