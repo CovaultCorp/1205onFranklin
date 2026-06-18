@@ -59,4 +59,8 @@ def init_db() -> None:
 
 def get_session() -> Generator[Session, None, None]:
     with SessionLocal() as session:
-        yield session
+        try:
+            yield session
+        except Exception:
+            session.rollback()
+            raise
