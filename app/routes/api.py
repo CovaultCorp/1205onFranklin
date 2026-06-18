@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -18,6 +18,7 @@ from app.models import (
     AccessProfile,
     AccessRequest,
     AuditLog,
+    BuildingProperty,
     Company,
     CompanySuite,
     Conflict,
@@ -25,13 +26,22 @@ from app.models import (
     PortalAccount,
     ReportRun,
     Suite,
+    SyncRun,
+    SyncRunLog,
+    SyncSnapshot,
     SyncJob,
+    StagedAccessChange,
+    UnifiAccessPolicy,
+    UnifiDoor,
+    UnifiDoorGroup,
     UnifiUser,
+    UnifiUserGroup,
     User,
     utcnow,
 )
 from app.reports import generate_report, send_report
 from app.security import COOKIE_NAME, create_session_token, get_current_account, has_admin, verify_password
+from app.unifi_normalization import normalize_unifi_user, sanitize_for_snapshot
 
 router = APIRouter(prefix="/api")
 logger = logging.getLogger(__name__)
@@ -81,6 +91,17 @@ class ReportGenerateIn(BaseModel):
     send_email: bool = False
 
 
+class AgentSnapshotIn(BaseModel):
+    agent_name: str | None = None
+    source: str | None = None
+    observed_at: datetime | None = None
+    users: list[dict[str, Any]] = []
+    access_policies: list[dict[str, Any]] = []
+    user_groups: list[dict[str, Any]] = []
+    doors: list[dict[str, Any]] = []
+    door_groups: list[dict[str, Any]] = []
+
+
 def _require_api_admin(account: PortalAccount | None = Depends(get_current_account)) -> PortalAccount:
     if account is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
@@ -93,6 +114,22 @@ def _account_json(account: PortalAccount | None) -> dict[str, Any] | None:
     if account is None:
         return None
     return {"id": account.id, "email": account.email, "role": account.role}
+
+
+def _property_json(property_: BuildingProperty | None) -> dict[str, Any] | None:
+    if property_ is None:
+        return None
+    return {
+        "id": property_.id,
+        "slug": property_.slug,
+        "name": property_.name,
+        "display_name": property_.display_name,
+        "address_line1": property_.address_line1,
+        "city": property_.city,
+        "state": property_.state,
+        "postal_code": property_.postal_code,
+        "status": property_.status,
+    }
 
 
 def _company_json(company: Company | None) -> dict[str, Any] | None:
@@ -125,6 +162,84 @@ def _suite_json(suite: Suite | None) -> dict[str, Any] | None:
         "created_at": suite.created_at,
         "updated_at": suite.updated_at,
     }
+
+
+def _entrypoint_property(session: Session) -> BuildingProperty:
+    property_ = session.scalar(select(BuildingProperty).where(BuildingProperty.slug == "1205-franklin"))
+    if property_ is None:
+        property_ = BuildingProperty(
+            slug="1205-franklin",
+            name="ENTRY POINT",
+            display_name="1205 on Franklin",
+            address_line1="1205 Franklin",
+            city="Tampa",
+            state="FL",
+            status="active",
+            notes="Seed property for Entry Point at 1205 on Franklin.",
+        )
+        session.add(property_)
+        session.flush()
+    return property_
+
+
+def _require_agent_token(authorization: str | None = Header(default=None)) -> None:
+    settings = get_settings()
+    expected = settings.entrypoint_agent_token.strip()
+    if not expected:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Agent ingestion is not configured")
+    token = ""
+    if authorization:
+        scheme, _, value = authorization.partition(" ")
+        token = value.strip() if scheme.lower() == "bearer" else authorization.strip()
+    if token != expected:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent token")
+
+
+def _payload_id(payload: dict[str, Any], keys: tuple[str, ...] = ("id", "uuid")) -> str | None:
+    for key in keys:
+        value = payload.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return None
+
+
+def _payload_text(payload: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = payload.get(key)
+        if value not in (None, ""):
+            return str(value).strip() or None
+    return None
+
+
+def _upsert_named_unifi_record(
+    session: Session,
+    *,
+    model: type[UnifiAccessPolicy] | type[UnifiUserGroup] | type[UnifiDoorGroup] | type[UnifiDoor],
+    id_field: str,
+    property_id: int,
+    payload: dict[str, Any],
+    now: datetime,
+) -> Any | None:
+    external_id = _payload_id(
+        payload,
+        ("id", "uuid", "policy_id", "policyId", "group_id", "groupId", "door_id", "doorId", "door_group_id", "doorGroupId"),
+    )
+    if not external_id:
+        return None
+    record = session.scalar(select(model).where(getattr(model, "property_id") == property_id, getattr(model, id_field) == external_id))
+    if record is None:
+        record = model(property_id=property_id, **{id_field: external_id})
+        session.add(record)
+    record.name = _payload_text(payload, "name", "display_name", "displayName", "policy_name", "policyName", "group_name", "groupName")
+    if hasattr(record, "full_name"):
+        record.full_name = _payload_text(payload, "full_name", "fullName")
+    if hasattr(record, "description"):
+        record.description = _payload_text(payload, "description")
+    if hasattr(record, "status"):
+        record.status = _payload_text(payload, "status", "state")
+    record.raw_snapshot_json = sanitize_for_snapshot(payload)
+    record.last_seen_at = now
+    return record
 
 
 def _profile_json(profile: AccessProfile | None) -> dict[str, Any] | None:

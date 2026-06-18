@@ -28,10 +28,27 @@ class PortalAccount(TimestampMixin, Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
+class BuildingProperty(TimestampMixin, Base):
+    __tablename__ = "building_properties"
+    __table_args__ = (UniqueConstraint("slug", name="uq_building_properties_slug"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    slug: Mapped[str] = mapped_column(String(120), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    display_name: Mapped[str] = mapped_column(String(255))
+    address_line1: Mapped[str] = mapped_column(String(255))
+    city: Mapped[str | None] = mapped_column(String(120))
+    state: Mapped[str | None] = mapped_column(String(64))
+    postal_code: Mapped[str | None] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class Company(TimestampMixin, Base):
     __tablename__ = "companies"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int | None] = mapped_column(ForeignKey("building_properties.id"))
     name: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     legal_name: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(32), default="active")
@@ -40,16 +57,21 @@ class Company(TimestampMixin, Base):
     phone: Mapped[str | None] = mapped_column(String(64))
     notes: Mapped[str | None] = mapped_column(Text)
 
+    property: Mapped[BuildingProperty | None] = relationship()
+
 
 class Suite(TimestampMixin, Base):
     __tablename__ = "suites"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int | None] = mapped_column(ForeignKey("building_properties.id"))
     suite_number: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     floor: Mapped[str | None] = mapped_column(String(64))
     building_area: Mapped[str | None] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(32), default="active")
+
+    property: Mapped[BuildingProperty | None] = relationship()
 
 
 class CompanySuite(TimestampMixin, Base):
@@ -57,6 +79,7 @@ class CompanySuite(TimestampMixin, Base):
     __table_args__ = (UniqueConstraint("company_id", "suite_id", name="uq_company_suite"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int | None] = mapped_column(ForeignKey("building_properties.id"))
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"))
     suite_id: Mapped[int] = mapped_column(ForeignKey("suites.id"))
     occupancy_status: Mapped[str] = mapped_column(String(32), default="active")
@@ -66,12 +89,14 @@ class CompanySuite(TimestampMixin, Base):
 
     company: Mapped[Company] = relationship()
     suite: Mapped[Suite] = relationship()
+    property: Mapped[BuildingProperty | None] = relationship()
 
 
 class User(TimestampMixin, Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int | None] = mapped_column(ForeignKey("building_properties.id"))
     first_name: Mapped[str] = mapped_column(String(120))
     last_name: Mapped[str] = mapped_column(String(120))
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
@@ -94,12 +119,14 @@ class User(TimestampMixin, Base):
     company: Mapped[Company | None] = relationship()
     primary_suite: Mapped[Suite | None] = relationship()
     access_profile: Mapped[AccessProfile | None] = relationship()
+    property: Mapped[BuildingProperty | None] = relationship()
 
 
 class UserSuiteAssignment(TimestampMixin, Base):
     __tablename__ = "user_suite_assignments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int | None] = mapped_column(ForeignKey("building_properties.id"))
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     suite_id: Mapped[int] = mapped_column(ForeignKey("suites.id"))
     company_id: Mapped[int | None] = mapped_column(ForeignKey("companies.id"))
@@ -111,12 +138,14 @@ class UserSuiteAssignment(TimestampMixin, Base):
     user: Mapped[User] = relationship()
     suite: Mapped[Suite] = relationship()
     company: Mapped[Company | None] = relationship()
+    property: Mapped[BuildingProperty | None] = relationship()
 
 
 class AccessProfile(TimestampMixin, Base):
     __tablename__ = "access_profiles"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int | None] = mapped_column(ForeignKey("building_properties.id"))
     name: Mapped[str] = mapped_column(String(255), unique=True)
     description: Mapped[str | None] = mapped_column(Text)
     default_for_company_id: Mapped[int | None] = mapped_column(ForeignKey("companies.id"))
@@ -125,11 +154,79 @@ class AccessProfile(TimestampMixin, Base):
     unifi_user_group_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    property: Mapped[BuildingProperty | None] = relationship()
+
+
+class UnifiAccessPolicy(TimestampMixin, Base):
+    __tablename__ = "unifi_access_policies"
+    __table_args__ = (UniqueConstraint("property_id", "unifi_policy_id", name="uq_unifi_access_policy_property_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int | None] = mapped_column(ForeignKey("building_properties.id"))
+    unifi_policy_id: Mapped[str] = mapped_column(String(255), index=True)
+    name: Mapped[str | None] = mapped_column(String(255), index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str | None] = mapped_column(String(64))
+    raw_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    property: Mapped[BuildingProperty | None] = relationship()
+
+
+class UnifiUserGroup(TimestampMixin, Base):
+    __tablename__ = "unifi_user_groups"
+    __table_args__ = (UniqueConstraint("property_id", "unifi_group_id", name="uq_unifi_user_group_property_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int | None] = mapped_column(ForeignKey("building_properties.id"))
+    unifi_group_id: Mapped[str] = mapped_column(String(255), index=True)
+    name: Mapped[str | None] = mapped_column(String(255), index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str | None] = mapped_column(String(64))
+    raw_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    property: Mapped[BuildingProperty | None] = relationship()
+
+
+class UnifiDoorGroup(TimestampMixin, Base):
+    __tablename__ = "unifi_door_groups"
+    __table_args__ = (UniqueConstraint("property_id", "unifi_door_group_id", name="uq_unifi_door_group_property_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int | None] = mapped_column(ForeignKey("building_properties.id"))
+    unifi_door_group_id: Mapped[str] = mapped_column(String(255), index=True)
+    name: Mapped[str | None] = mapped_column(String(255), index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    raw_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    property: Mapped[BuildingProperty | None] = relationship()
+
+
+class UnifiDoor(TimestampMixin, Base):
+    __tablename__ = "unifi_doors"
+    __table_args__ = (UniqueConstraint("property_id", "unifi_door_id", name="uq_unifi_door_property_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int | None] = mapped_column(ForeignKey("building_properties.id"))
+    door_group_id: Mapped[int | None] = mapped_column(ForeignKey("unifi_door_groups.id"))
+    unifi_door_id: Mapped[str] = mapped_column(String(255), index=True)
+    name: Mapped[str | None] = mapped_column(String(255), index=True)
+    full_name: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str | None] = mapped_column(String(64))
+    raw_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    property: Mapped[BuildingProperty | None] = relationship()
+    door_group: Mapped[UnifiDoorGroup | None] = relationship()
+
 
 class AccessRequest(TimestampMixin, Base):
     __tablename__ = "access_requests"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int | None] = mapped_column(ForeignKey("building_properties.id"))
     request_type: Mapped[str] = mapped_column(String(64))
     requested_for_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     requested_for_first_name: Mapped[str] = mapped_column(String(120))
@@ -158,12 +255,14 @@ class AccessRequest(TimestampMixin, Base):
     company: Mapped[Company | None] = relationship(foreign_keys=[requested_for_company_id])
     suite: Mapped[Suite | None] = relationship(foreign_keys=[requested_for_suite_id])
     access_profile: Mapped[AccessProfile | None] = relationship()
+    property: Mapped[BuildingProperty | None] = relationship()
 
 
 class UnifiUser(TimestampMixin, Base):
     __tablename__ = "unifi_users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int | None] = mapped_column(ForeignKey("building_properties.id"))
     local_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     unifi_user_id: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     email: Mapped[str | None] = mapped_column(String(255), index=True)
@@ -191,11 +290,14 @@ class UnifiUser(TimestampMixin, Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    property: Mapped[BuildingProperty | None] = relationship()
+
 
 class SyncJob(TimestampMixin, Base):
     __tablename__ = "sync_jobs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int | None] = mapped_column(ForeignKey("building_properties.id"))
     access_request_id: Mapped[int | None] = mapped_column(ForeignKey("access_requests.id"))
     job_type: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(64), default="pending")
@@ -204,6 +306,76 @@ class SyncJob(TimestampMixin, Base):
     attempt_count: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(Text)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    property: Mapped[BuildingProperty | None] = relationship()
+
+
+class SyncRun(TimestampMixin, Base):
+    __tablename__ = "sync_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int | None] = mapped_column(ForeignKey("building_properties.id"))
+    source: Mapped[str] = mapped_column(String(120), default="local_lan_agent")
+    agent_name: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(64), default="received")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    summary_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+    property: Mapped[BuildingProperty | None] = relationship()
+
+
+class SyncSnapshot(TimestampMixin, Base):
+    __tablename__ = "sync_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int | None] = mapped_column(ForeignKey("building_properties.id"))
+    sync_run_id: Mapped[int | None] = mapped_column(ForeignKey("sync_runs.id"))
+    snapshot_type: Mapped[str] = mapped_column(String(64), index=True)
+    source: Mapped[str] = mapped_column(String(120), default="unifi_access")
+    external_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    normalized_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    raw_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    property: Mapped[BuildingProperty | None] = relationship()
+    sync_run: Mapped[SyncRun | None] = relationship()
+
+
+class SyncRunLog(Base):
+    __tablename__ = "sync_run_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sync_run_id: Mapped[int] = mapped_column(ForeignKey("sync_runs.id"))
+    level: Mapped[str] = mapped_column(String(32), default="info")
+    message: Mapped[str] = mapped_column(Text)
+    context_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    sync_run: Mapped[SyncRun] = relationship()
+
+
+class StagedAccessChange(TimestampMixin, Base):
+    __tablename__ = "staged_access_changes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int | None] = mapped_column(ForeignKey("building_properties.id"))
+    sync_job_id: Mapped[int | None] = mapped_column(ForeignKey("sync_jobs.id"))
+    access_request_id: Mapped[int | None] = mapped_column(ForeignKey("access_requests.id"))
+    local_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    unifi_user_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    change_type: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(64), default="staged")
+    proposed_before_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    proposed_after_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    approved_by_account_id: Mapped[int | None] = mapped_column(ForeignKey("portal_accounts.id"))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+    property: Mapped[BuildingProperty | None] = relationship()
 
 
 class AuditLog(Base):

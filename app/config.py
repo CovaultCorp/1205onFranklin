@@ -8,6 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://building_access:change_me@db:5432/building_access_registry"
+    direct_url: str = ""
+    entrypoint_agent_token: str = ""
     app_secret_key: str = "change_me"
     admin_email: str = "admin@example.com"
     admin_initial_password: str = ""
@@ -21,6 +23,8 @@ class Settings(BaseSettings):
     unifi_access_token: str = ""
     unifi_access_verify_ssl: bool = False
     unifi_access_page_size: int = 100
+    unifi_agent_name: str = "1205-local-lan-agent"
+    unifi_snapshot_source: str = "local_lan_agent"
     enable_writes: bool = False
     sync_interval_seconds: int = 300
 
