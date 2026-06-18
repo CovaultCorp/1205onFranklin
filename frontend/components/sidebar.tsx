@@ -13,6 +13,7 @@ import {
   Layers3,
   LogOut,
   Settings,
+  ShieldCheck,
   Users
 } from "lucide-react";
 import Link from "next/link";
