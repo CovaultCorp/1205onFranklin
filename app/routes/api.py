@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.audit import audit
 from app.config import get_settings
-from app.db import get_session
+from app.db import get_session, safe_database_identity
 from app.models import (
     AccessProfile,
     AccessRequest,
@@ -33,6 +34,7 @@ from app.reports import generate_report, send_report
 from app.security import COOKIE_NAME, create_session_token, get_current_account, has_admin, verify_password
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
 
 
 class LoginIn(BaseModel):
@@ -169,7 +171,9 @@ def _request_json(access_request: AccessRequest) -> dict[str, Any]:
     }
 
 
-def _user_json(user: User) -> dict[str, Any]:
+def _user_json(user: User, snapshot: UnifiUser | None = None) -> dict[str, Any]:
+    current_policy_names = snapshot.access_policy_names if snapshot else []
+    current_group_names = snapshot.group_names if snapshot else []
     return {
         "id": user.id,
         "name": f"{user.first_name} {user.last_name}",
@@ -185,6 +189,8 @@ def _user_json(user: User) -> dict[str, Any]:
         "last_verified_at": user.last_verified_at,
         "desired_unifi_access_policy_names": user.desired_unifi_access_policy_names or [],
         "desired_unifi_user_group_names": user.desired_unifi_user_group_names or [],
+        "current_unifi_access_policy_names": current_policy_names or [],
+        "current_unifi_user_group_names": current_group_names or [],
     }
 
 
@@ -548,7 +554,37 @@ def api_admin_users(
     session: Session = Depends(get_session),
     account: PortalAccount = Depends(_require_api_admin),
 ):
-    return {"users": [_user_json(user) for user in session.scalars(select(User).order_by(User.last_name, User.first_name)).all()]}
+    db_identity = safe_database_identity()
+    total_users = session.scalar(select(func.count(User.id))) or 0
+    active_users = session.scalar(select(func.count(User.id)).where(User.status == "active")) or 0
+    snapshot_count = session.scalar(select(func.count(UnifiUser.id))) or 0
+    unmatched_snapshot_count = (
+        session.scalar(select(func.count(UnifiUser.id)).where(UnifiUser.local_user_id.is_(None))) or 0
+    )
+    users = session.scalars(select(User).order_by(User.last_name, User.first_name)).all()
+    logger.info(
+        "admin users fetch db_driver=%s db_host=%s db_name=%s filters=%s users_found=%s active_users=%s "
+        "unifi_snapshots=%s unmatched_unifi_snapshots=%s",
+        db_identity["driver"],
+        db_identity["host"],
+        db_identity["database"],
+        "none",
+        len(users),
+        active_users,
+        snapshot_count,
+        unmatched_snapshot_count,
+    )
+
+    user_rows = []
+    for user in users:
+        snapshot = session.scalar(
+            select(UnifiUser)
+            .where((UnifiUser.local_user_id == user.id) | (func.lower(UnifiUser.email) == user.email.lower()))
+            .order_by(UnifiUser.local_user_id.desc(), UnifiUser.last_seen_at.desc().nullslast())
+            .limit(1)
+        )
+        user_rows.append(_user_json(user, snapshot))
+    return {"users": user_rows, "meta": {"total_users": total_users, "filters": {}}}
 
 
 @router.get("/admin/companies")

@@ -43,6 +43,10 @@ export type User = {
   department?: string | null;
   status: string;
   last_verified_at?: string | null;
+  desired_unifi_access_policy_names?: string[];
+  desired_unifi_user_group_names?: string[];
+  current_unifi_access_policy_names?: string[];
+  current_unifi_user_group_names?: string[];
 };
 
 export type Company = Lookup & {

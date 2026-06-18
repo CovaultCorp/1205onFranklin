@@ -10,7 +10,8 @@ type RouteContext = {
 
 async function proxy(request: NextRequest, context: RouteContext) {
   const { path } = await context.params;
-  const target = `${backendUrl.replace(/\/$/, "")}/api/${path.join("/")}${request.nextUrl.search}`;
+  const apiPath = path.join("/");
+  const target = `${backendUrl.replace(/\/$/, "")}/api/${apiPath}${request.nextUrl.search}`;
 
   const body = ["GET", "HEAD"].includes(request.method)
     ? undefined
@@ -37,6 +38,14 @@ async function proxy(request: NextRequest, context: RouteContext) {
 
   const setCookie = upstream.headers.get("set-cookie");
   if (setCookie) responseHeaders.set("set-cookie", setCookie);
+
+  if (apiPath === "admin/users") {
+    console.info("ENTRY POINT users proxy fetch", {
+      method: request.method,
+      backendHost: new URL(backendUrl).host,
+      status: upstream.status,
+    });
+  }
 
   return new NextResponse(await upstream.text(), {
     status: upstream.status,

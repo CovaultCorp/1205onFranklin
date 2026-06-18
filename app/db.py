@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Generator
 
 from sqlalchemy import create_engine
+from sqlalchemy.engine import URL
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
@@ -24,6 +25,16 @@ def _engine_kwargs(database_url: str) -> dict:
     if database_url.startswith("sqlite"):
         return {"connect_args": {"check_same_thread": False}}
     return {"pool_pre_ping": True}
+
+
+def safe_database_identity() -> dict[str, str]:
+    url: URL = engine.url
+    return {
+        "driver": url.drivername,
+        "host": url.host or "local-file",
+        "database": url.database or "",
+        "url": url.render_as_string(hide_password=True),
+    }
 
 
 settings = get_settings()
