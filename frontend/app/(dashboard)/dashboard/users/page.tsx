@@ -30,7 +30,7 @@ export default function UsersPage() {
 
   return (
     <div className="page">
-      <PageTitle eyebrow="Access Management" title="Users" description="Search local registry users, assigned companies, suites, profiles, and verification status." />
+      <PageTitle eyebrow="ENTRY POINT" title="Users" description="Search local registry users, assigned tenants, suites, profiles, and latest UniFi state." />
       {error ? <p className="text-danger">{error.message}</p> : null}
       <DataTable<User>
         ariaLabel="Users"

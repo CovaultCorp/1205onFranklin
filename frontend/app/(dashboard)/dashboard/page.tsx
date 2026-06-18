@@ -109,8 +109,8 @@ export default function DashboardPage() {
     <div className="page">
       <section className="dashboard-hero">
         <div>
-          <div className="eyebrow">Building Access Registry</div>
-          <h1 className="mt-2 text-3xl font-bold tracking-tight md:text-4xl">Operations dashboard</h1>
+          <div className="eyebrow">{data.property?.display_name ?? "1205 on Franklin"}</div>
+          <h1 className="mt-2 text-3xl font-bold tracking-tight md:text-4xl">ENTRY POINT operations</h1>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-default-500">
             Monitor the local registry source of truth, review access workflows, and keep UniFi sync planning visible without enabling write behavior.
           </p>
@@ -160,6 +160,14 @@ export default function DashboardPage() {
           helper="Active users not verified recently"
           trend="90 day threshold"
           tone="warning"
+        />
+        <KpiCard
+          label="UniFi Snapshots"
+          value={data.stats.unifi_snapshots ?? 0}
+          icon={DatabaseZap}
+          helper="Latest users received from the LAN agent"
+          trend={`${data.stats.sync_runs ?? 0} sync runs`}
+          tone="primary"
         />
       </section>
 
