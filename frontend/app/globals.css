@@ -121,17 +121,39 @@ a {
   justify-content: space-between;
 }
 
-.brand-mark {
+.brand-logo-shell {
   align-items: center;
-  background: linear-gradient(180deg, #338ef7, #006fee);
+  background: #fff;
+  border: 1px solid rgba(17, 24, 39, 0.08);
   border-radius: 12px;
-  box-shadow: 0 10px 24px rgba(0, 111, 238, 0.24);
-  color: white;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
   display: flex;
   flex-shrink: 0;
-  height: 42px;
   justify-content: center;
-  width: 42px;
+  padding: 8px 12px;
+}
+
+.brand-logo-sidebar {
+  height: 72px;
+  width: 176px;
+}
+
+.brand-logo-auth {
+  height: 86px;
+  width: 240px;
+}
+
+.brand-logo-compact {
+  height: 64px;
+  width: 196px;
+}
+
+.brand-logo-image {
+  height: 100%;
+  max-height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+  width: 100%;
 }
 
 .nav-section {
@@ -296,6 +318,17 @@ a {
   .sidebar {
     height: auto;
     position: static;
+  }
+
+  .brand-logo-sidebar,
+  .brand-logo-compact {
+    height: 48px;
+    width: 150px;
+  }
+
+  .brand-logo-auth {
+    height: 72px;
+    width: 214px;
   }
 
   .dashboard-grid,

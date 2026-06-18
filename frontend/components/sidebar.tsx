@@ -13,12 +13,12 @@ import {
   Layers3,
   LogOut,
   Settings,
-  ShieldCheck,
   Users
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { logout } from "@/services/auth";
+import { BrandLogo } from "./brand-logo";
 import { ThemeToggle } from "./theme-toggle";
 
 const groups = [
@@ -66,15 +66,7 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <Link href="/dashboard" className="flex min-w-0 items-center gap-3">
-          <div className="brand-mark">
-            <ShieldCheck size={22} />
-          </div>
-          <div className="min-w-0">
-            <div className="truncate text-sm font-bold leading-tight">Building Access Registry</div>
-            <div className="mt-0.5 text-xs text-default-500">Access operations</div>
-          </div>
-        </Link>
+        <BrandLogo />
         <ThemeToggle />
       </div>
       <Divider className="my-5" />

@@ -3,6 +3,7 @@
 import { Button, Card, CardBody, CardHeader, Input, Select, SelectItem, Textarea } from "@heroui/react";
 import { Send } from "lucide-react";
 import { FormEvent, useState } from "react";
+import { BrandLogo } from "@/components/brand-logo";
 import { submitAccessRequest } from "@/services/requests";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -41,12 +42,15 @@ export default function RequestAccessPage() {
     <main className="content">
       <div className="page">
         <div className="page-header">
-          <div>
-            <div className="eyebrow">Public portal</div>
+          <div className="grid gap-5">
+            <BrandLogo href="/request-access" size="compact" />
+            <div>
+              <div className="eyebrow">Public portal</div>
             <h1 className="text-3xl font-bold">Request access</h1>
             <p className="mt-2 max-w-2xl text-default-500">
               Submit building access changes for admin review. Provisioning stays pending until an admin approves it.
             </p>
+            </div>
           </div>
           <ThemeToggle />
         </div>

@@ -1,9 +1,9 @@
 "use client";
 
 import { Button, Card, CardBody, Input } from "@heroui/react";
-import { LockKeyhole } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
+import { BrandLogo } from "@/components/brand-logo";
 import { login } from "@/services/auth";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -34,13 +34,11 @@ export default function LoginPage() {
       </div>
       <Card className="w-full max-w-md" radius="sm">
         <CardBody className="gap-6 p-8">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary text-white">
-              <LockKeyhole size={22} />
-            </div>
+          <div className="grid justify-items-start gap-4">
+            <BrandLogo href="" size="auth" />
             <div>
               <h1 className="text-2xl font-bold">Admin login</h1>
-              <p className="text-sm text-default-500">Building Access Registry</p>
+              <p className="text-sm text-default-500">Access operations dashboard</p>
             </div>
           </div>
           <form className="grid gap-4" onSubmit={submit}>
