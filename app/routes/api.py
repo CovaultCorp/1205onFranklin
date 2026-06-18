@@ -242,6 +242,56 @@ def _upsert_named_unifi_record(
     return record
 
 
+def _upsert_agent_unifi_user(session: Session, *, property_id: int, payload: dict[str, Any], now: datetime) -> UnifiUser | None:
+    normalized = normalize_unifi_user(payload)
+    unifi_user_id = normalized["id"]
+    if not unifi_user_id:
+        return None
+
+    snapshot = session.scalar(select(UnifiUser).where(UnifiUser.unifi_user_id == unifi_user_id))
+    local_user: User | None = None
+    if snapshot and snapshot.local_user_id:
+        local_user = session.get(User, snapshot.local_user_id)
+    if local_user is None and normalized["employee_number"]:
+        local_user = session.scalar(select(User).where(User.employee_number == normalized["employee_number"]))
+    if local_user is None and normalized["email"]:
+        local_user = session.scalar(select(User).where(User.email == normalized["email"]))
+
+    if snapshot is None:
+        snapshot = UnifiUser(unifi_user_id=unifi_user_id)
+        session.add(snapshot)
+    snapshot.property_id = property_id
+    if local_user is not None:
+        snapshot.local_user_id = local_user.id
+        if local_user.property_id is None:
+            local_user.property_id = property_id
+    snapshot.email = normalized["email"] or None
+    snapshot.email_status = normalized["email_status"] or None
+    snapshot.employee_number = normalized["employee_number"] or None
+    snapshot.suite_number = normalized["suite_number"] or None
+    snapshot.first_name = normalized["first_name"] or None
+    snapshot.last_name = normalized["last_name"] or None
+    snapshot.full_name = normalized["full_name"] or None
+    snapshot.phone = normalized["phone"] or None
+    snapshot.username = normalized["username"] or None
+    snapshot.alias = normalized["alias"] or None
+    snapshot.status = normalized["status"] or None
+    snapshot.onboard_time = normalized["onboard_time"] or None
+    snapshot.access_policy_ids = normalized["access_policy_ids"]
+    snapshot.access_policy_names = normalized["access_policy_names"]
+    snapshot.group_ids = normalized["group_ids"]
+    snapshot.group_names = normalized["group_names"]
+    snapshot.nfc_card_count = normalized["nfc_card_count"]
+    snapshot.touch_pass_status = normalized["touch_pass_status"] or None
+    snapshot.touch_pass_last_activity = normalized["touch_pass_last_activity"] or None
+    snapshot.license_plate_count = normalized["license_plate_count"]
+    snapshot.raw_user_json_file = normalized["raw_user_json_file"] or None
+    snapshot.raw_snapshot_json = sanitize_for_snapshot(payload)
+    snapshot.last_seen_at = now
+    snapshot.last_synced_at = now
+    return snapshot
+
+
 def _profile_json(profile: AccessProfile | None) -> dict[str, Any] | None:
     if profile is None:
         return None
