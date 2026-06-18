@@ -74,6 +74,8 @@ Run continuously:
 python scripts/unifi_access_agent.py
 ```
 
+Portainer/local Docker deployment can run the optional `unifi-agent` service from `docker-compose.yml` or `portainer-stack.yml`. For a hosted Railway/Vercel app, set `ENTRYPOINT_API_BASE_URL` to the hosted FastAPI URL and keep `ENTRYPOINT_AGENT_TOKEN` identical on the hosted backend and local agent. The agent container must run on a network that can reach the UniFi Access console on port `12445`.
+
 UniFi Access API notes from the vendor documentation:
 
 - Create the API token in the UniFi Access application console under Access settings, General, Advanced, API Token. Copy it at creation time and store it only in server or local-agent environment variables.
