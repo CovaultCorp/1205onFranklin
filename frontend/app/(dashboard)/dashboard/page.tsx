@@ -8,6 +8,7 @@ import {
   ClipboardList,
   DatabaseZap,
   DoorOpen,
+  FileText,
   Layers3,
   ShieldCheck,
   Users
@@ -83,7 +84,7 @@ const modules = [
     href: "/dashboard/reports",
     title: "Reports",
     description: "Generate previews, CSV exports, and emails.",
-    icon: ClipboardList,
+    icon: FileText,
     tone: "primary"
   }
 ] as const;
