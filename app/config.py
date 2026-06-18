@@ -19,10 +19,14 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     export_dir: Path = Path("/app/exports")
 
+    entrypoint_api_base_url: str = ""
     unifi_access_base_url: str = "https://192.168.1.1:12445"
+    unifi_access_host: str = ""
     unifi_access_token: str = ""
     unifi_access_verify_ssl: bool = False
     unifi_access_page_size: int = 100
+    unifi_request_timeout_seconds: float = 30
+    unifi_request_retries: int = 3
     unifi_agent_name: str = "1205-local-lan-agent"
     unifi_snapshot_source: str = "local_lan_agent"
     enable_writes: bool = False

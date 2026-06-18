@@ -1,5 +1,6 @@
 "use client";
 
+import { Chip } from "@heroui/react";
 import { useQuery } from "@tanstack/react-query";
 import { PageTitle } from "@/components/page-title";
 import { DataTable } from "@/components/data-table";
@@ -25,6 +26,20 @@ function accessSummary(user: User) {
   return [...uniquePolicies, ...uniqueGroups].join(", ");
 }
 
+function sourceChip(user: User) {
+  return (
+    <Chip size="sm" variant="flat" color={user.data_source?.includes("UniFi") ? "primary" : "default"}>
+      {user.data_source ?? "Entry Point"}
+    </Chip>
+  );
+}
+
+function suiteLabel(user: User) {
+  if (user.suite?.suite_number) return user.suite.suite_number;
+  if (user.unifi_suite_number) return `UniFi ${user.unifi_suite_number}`;
+  return "Unassigned";
+}
+
 export default function UsersPage() {
   const { data, isLoading, error } = useQuery({ queryKey: ["users"], queryFn: getUsers });
 
@@ -36,15 +51,18 @@ export default function UsersPage() {
         ariaLabel="Users"
         rows={data?.users ?? []}
         isLoading={isLoading}
-        searchText={(user) => `${user.name} ${user.email} ${user.company?.name ?? ""} ${user.suite?.suite_number ?? ""} ${user.status} ${accessSummary(user)}`}
+        emptyContent="No Entry Point or UniFi Access users found"
+        searchText={(user) => `${user.name} ${user.email} ${user.company?.name ?? ""} ${suiteLabel(user)} ${user.status} ${user.unifi_status ?? ""} ${user.data_source ?? ""} ${accessSummary(user)}`}
         columns={[
           { key: "name", label: "Name", render: (user) => user.name, sortable: true },
-          { key: "email", label: "Email", render: (user) => user.email, sortable: true },
+          { key: "source", label: "Source", render: sourceChip, sortable: true },
+          { key: "email", label: "Email", render: (user) => user.email || "No email", sortable: true },
           { key: "company", label: "Company", render: (user) => user.company?.name ?? "Unassigned", sortable: true },
-          { key: "suite", label: "Suite", render: (user) => user.suite?.suite_number ?? "Unassigned", sortable: true },
-          { key: "access", label: "Access Policy / Group", render: accessSummary, sortable: true },
-          { key: "status", label: "Status", render: (user) => <StatusBadge value={user.status} /> },
-          { key: "verified", label: "Verified", render: (user) => formatDate(user.last_verified_at), sortable: true }
+          { key: "suite", label: "Suite", render: suiteLabel, sortable: true },
+          { key: "unifi_status", label: "UniFi Status", render: (user) => <StatusBadge value={user.unifi_status ?? user.status} /> },
+          { key: "access", label: "Access Policies / Groups", render: accessSummary, sortable: true },
+          { key: "credentials", label: "Credentials", render: (user) => user.credential_summary ?? "Not synced", sortable: true },
+          { key: "synced", label: "Last Synced", render: (user) => formatDate(user.last_synced_at), sortable: true }
         ]}
       />
     </div>

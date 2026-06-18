@@ -12,10 +12,14 @@ services:
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       EXPORT_DIR: /app/exports
+      ENTRYPOINT_AGENT_TOKEN: ${ENTRYPOINT_AGENT_TOKEN:-}
       UNIFI_ACCESS_BASE_URL: ${UNIFI_ACCESS_BASE_URL:-https://192.168.1.1:12445}
+      UNIFI_ACCESS_HOST: ${UNIFI_ACCESS_HOST:-}
       UNIFI_ACCESS_TOKEN: ${UNIFI_ACCESS_TOKEN:-}
       UNIFI_ACCESS_VERIFY_SSL: ${UNIFI_ACCESS_VERIFY_SSL:-false}
       UNIFI_ACCESS_PAGE_SIZE: ${UNIFI_ACCESS_PAGE_SIZE:-100}
+      UNIFI_REQUEST_TIMEOUT_SECONDS: ${UNIFI_REQUEST_TIMEOUT_SECONDS:-30}
+      UNIFI_REQUEST_RETRIES: ${UNIFI_REQUEST_RETRIES:-3}
       ENABLE_WRITES: ${ENABLE_WRITES:-false}
       SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-300}
       SMTP_HOST: ${SMTP_HOST:-}
@@ -68,6 +72,29 @@ services:
       - /mnt/unas/docker-exports/building-access-registry:/app/exports
     depends_on:
       - db
+    restart: unless-stopped
+
+  unifi-agent:
+    build: .
+    container_name: building-access-registry-unifi-agent
+    command: ["python", "scripts/unifi_access_agent.py"]
+    environment:
+      ENTRYPOINT_API_BASE_URL: ${ENTRYPOINT_API_BASE_URL:-http://web:8080}
+      ENTRYPOINT_AGENT_TOKEN: ${ENTRYPOINT_AGENT_TOKEN:-}
+      UNIFI_ACCESS_BASE_URL: ${UNIFI_ACCESS_BASE_URL:-https://192.168.1.1:12445}
+      UNIFI_ACCESS_HOST: ${UNIFI_ACCESS_HOST:-}
+      UNIFI_ACCESS_TOKEN: ${UNIFI_ACCESS_TOKEN:-}
+      UNIFI_ACCESS_VERIFY_SSL: ${UNIFI_ACCESS_VERIFY_SSL:-false}
+      UNIFI_ACCESS_PAGE_SIZE: ${UNIFI_ACCESS_PAGE_SIZE:-100}
+      UNIFI_REQUEST_TIMEOUT_SECONDS: ${UNIFI_REQUEST_TIMEOUT_SECONDS:-30}
+      UNIFI_REQUEST_RETRIES: ${UNIFI_REQUEST_RETRIES:-3}
+      UNIFI_AGENT_NAME: ${UNIFI_AGENT_NAME:-1205-local-lan-agent}
+      UNIFI_SNAPSHOT_SOURCE: ${UNIFI_SNAPSHOT_SOURCE:-local_lan_agent}
+      SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-300}
+      ENABLE_WRITES: "false"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      - web
     restart: unless-stopped
 
   db:

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import Any
 
 import httpx
 
 from app.config import Settings, get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class WritesDisabledError(RuntimeError):
@@ -16,24 +20,50 @@ class UniFiAccessClient:
         self.settings = settings or get_settings()
         self.transport = transport
 
+    @property
+    def base_url(self) -> str:
+        host = (self.settings.unifi_access_host or "").strip()
+        if host:
+            if host.startswith(("http://", "https://")):
+                return host.rstrip("/")
+            if ":" in host:
+                return f"https://{host}".rstrip("/")
+            return f"https://{host}:12445"
+        return self.settings.unifi_access_base_url.rstrip("/")
+
     def _headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self.settings.unifi_access_token}"}
+        return {
+            "Authorization": f"Bearer {self.settings.unifi_access_token}",
+            "accept": "application/json",
+            "content-type": "application/json",
+        }
 
     async def _get_json(self, path: str, *, params: list[tuple[str, Any]] | dict[str, Any] | None = None) -> Any:
         if not self.settings.unifi_access_token:
             return {"data": []}
-        async with httpx.AsyncClient(
-            verify=self.settings.unifi_access_verify_ssl,
-            timeout=30,
-            transport=self.transport,
-        ) as client:
-            response = await client.get(
-                f"{self.settings.unifi_access_base_url.rstrip('/')}{path}",
-                headers=self._headers(),
-                params=params,
-            )
-            response.raise_for_status()
-            return response.json()
+        attempts = max(1, self.settings.unifi_request_retries)
+        last_error: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                async with httpx.AsyncClient(
+                    verify=self.settings.unifi_access_verify_ssl,
+                    timeout=self.settings.unifi_request_timeout_seconds,
+                    transport=self.transport,
+                ) as client:
+                    response = await client.get(
+                        f"{self.base_url}{path}",
+                        headers=self._headers(),
+                        params=params,
+                    )
+                    response.raise_for_status()
+                    return response.json()
+            except httpx.HTTPError as exc:
+                last_error = exc
+                if attempt >= attempts:
+                    break
+                logger.warning("UniFi GET %s failed on attempt %s/%s: %s", path, attempt, attempts, exc.__class__.__name__)
+                await asyncio.sleep(min(2 ** (attempt - 1), 5))
+        raise last_error or RuntimeError(f"UniFi GET {path} failed")
 
     @staticmethod
     def _items_from_payload(payload: Any) -> list[dict[str, Any]]:
@@ -63,6 +93,9 @@ class UniFiAccessClient:
             payload = await self._get_json(path, params=page_params)
             items = self._items_from_payload(payload)
             all_items.extend(items)
+            total = payload.get("pagination", {}).get("total") if isinstance(payload, dict) else None
+            if total is not None and len(all_items) >= int(total):
+                break
             if len(items) < page_size:
                 break
             page_num += 1
@@ -93,6 +126,12 @@ class UniFiAccessClient:
 
     async def list_user_groups(self) -> list[dict[str, Any]]:
         return await self._list_paginated("/api/v1/developer/user_groups")
+
+    async def list_doors(self) -> list[dict[str, Any]]:
+        return await self._list_paginated("/api/v1/developer/doors")
+
+    async def list_door_groups(self) -> list[dict[str, Any]]:
+        return await self._list_paginated("/api/v1/developer/door_groups")
 
     def _ensure_writes_enabled(self) -> None:
         if not self.settings.enable_writes:

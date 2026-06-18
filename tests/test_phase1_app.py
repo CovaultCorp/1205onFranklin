@@ -21,6 +21,7 @@ def app_context(tmp_path, monkeypatch):
     monkeypatch.setenv("ENABLE_EMAIL", "false")
     monkeypatch.setenv("ENABLE_WRITES", "false")
     monkeypatch.setenv("UNIFI_ACCESS_TOKEN", "")
+    monkeypatch.setenv("ENTRYPOINT_AGENT_TOKEN", "test-agent-token")
 
     import app.config
     import app.db
@@ -208,6 +209,70 @@ def test_json_api_users_returns_dashboard_field_contract(app_context):
     assert row["desired_unifi_user_group_names"] == ["Tenant Staff"]
     assert row["current_unifi_access_policy_names"] == ["Front Door"]
     assert row["current_unifi_user_group_names"] == ["Employees"]
+
+
+def test_agent_snapshot_ingestion_upserts_read_only_unifi_records_and_users_api_rows(app_context):
+    client, session_factory, _ = app_context
+    create_admin_and_login(client)
+
+    response = client.post(
+        "/api/agent/snapshots",
+        headers={"Authorization": "Bearer test-agent-token"},
+        json={
+            "agent_name": "test-lan-agent",
+            "source": "local_lan_agent",
+            "users": [
+                {
+                    "id": "unifi-1",
+                    "first_name": "Nora",
+                    "last_name": "Tenant",
+                    "user_email": "nora@example.com",
+                    "employee_number": "E-1205",
+                    "status": "active",
+                    "onboard_time": "2026-01-02T03:04:05Z",
+                    "nfc_cards": [{"id": "redacted-card"}],
+                    "access_policy": [{"id": "policy-1", "name": "Main Entry"}],
+                    "groups": [{"id": "group-1", "name": "Tenant Staff"}],
+                }
+            ],
+            "access_policies": [{"id": "policy-1", "name": "Main Entry"}],
+            "user_groups": [{"id": "group-1", "name": "Tenant Staff"}],
+            "door_groups": [{"id": "door-group-1", "name": "Exterior"}],
+            "doors": [{"id": "door-1", "name": "Front Door", "door_group_id": "door-group-1", "status": "online"}],
+        },
+    )
+    assert response.status_code == 202
+    assert response.json()["sync_run"]["summary"]["users_upserted"] == 1
+
+    with session_factory() as session:
+        from app.models import BuildingProperty, SyncRun, SyncSnapshot, UnifiAccessPolicy, UnifiDoor, UnifiDoorGroup, UnifiUser, UnifiUserGroup
+
+        assert session.scalar(select(BuildingProperty).where(BuildingProperty.slug == "1205-franklin")) is not None
+        snapshot = session.scalar(select(UnifiUser).where(UnifiUser.unifi_user_id == "unifi-1"))
+        assert snapshot is not None
+        assert snapshot.property is not None
+        assert snapshot.access_policy_names == ["Main Entry"]
+        assert snapshot.group_names == ["Tenant Staff"]
+        assert snapshot.nfc_card_count == 1
+        assert snapshot.raw_snapshot_json["nfc_cards"] == "[REDACTED]"
+        assert session.scalar(select(UnifiAccessPolicy).where(UnifiAccessPolicy.unifi_policy_id == "policy-1")) is not None
+        assert session.scalar(select(UnifiUserGroup).where(UnifiUserGroup.unifi_group_id == "group-1")) is not None
+        assert session.scalar(select(UnifiDoorGroup).where(UnifiDoorGroup.unifi_door_group_id == "door-group-1")) is not None
+        assert session.scalar(select(UnifiDoor).where(UnifiDoor.unifi_door_id == "door-1")) is not None
+        assert session.scalar(select(SyncRun)) is not None
+        assert session.scalar(select(SyncSnapshot).where(SyncSnapshot.snapshot_type == "unifi_user")) is not None
+
+    response = client.get("/api/admin/users")
+    assert response.status_code == 200
+    row = response.json()["users"][0]
+    assert row["name"] == "Nora Tenant"
+    assert row["email"] == "nora@example.com"
+    assert row["data_source"] == "UniFi Access"
+    assert row["unifi_status"] == "active"
+    assert row["current_unifi_access_policy_names"] == ["Main Entry"]
+    assert row["current_unifi_user_group_names"] == ["Tenant Staff"]
+    assert row["credential_summary"] == "NFC 1"
+    assert row["last_synced_at"] is not None
 
 
 def test_report_generation_email_preview_and_verification(app_context):

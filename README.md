@@ -1,5 +1,93 @@
 # Building Access Registry
 
+ENTRY POINT is the hosted access registry and operations dashboard for 1205 on Franklin.
+
+## 2026 Vercel database update
+
+The app is now structured for Vercel Postgres / Neon while preserving the existing clean backend ORM:
+
+- ORM: SQLAlchemy 2.x
+- Migrations: Alembic
+- Frontend data flow: Next.js dashboard -> FastAPI JSON API -> PostgreSQL
+- Production database recommendation: Vercel Postgres / Neon
+- Optional migration URL: `DIRECT_URL`
+
+There is no Prisma schema in this repository. Do not add Prisma just to use Vercel Postgres; the current SQLAlchemy layer works with Neon PostgreSQL URLs.
+
+Before replacing any existing Railway database, run diagnostics and export anything that is not recoverable from UniFi Access or source files:
+
+```bash
+python scripts/diagnose_users.py
+python scripts/import_unifi_old_dump.py all_unifi_users.csv --dry-run
+```
+
+The local workspace `dev.db` checked during this update contained no companies, suites, users, assignments, UniFi snapshots, or Alembic version state. That does not prove the remote Railway database is empty.
+
+Local development reset:
+
+```bash
+python scripts/reset_local_db.py --yes
+python scripts/seed_entrypoint.py
+```
+
+Vercel/Neon environment variables:
+
+```text
+DATABASE_URL=postgresql://... pooled Neon/Vercel URL ...
+DIRECT_URL=postgresql://... optional direct Neon URL for Alembic ...
+ENTRYPOINT_AGENT_TOKEN=replace_with_random_bearer_token
+APP_SECRET_KEY=replace_me
+PUBLIC_BASE_URL=https://your-vercel-app.example
+BACKEND_API_URL=https://your-fastapi-backend.example
+ENABLE_WRITES=false
+```
+
+Local LAN UniFi agent variables:
+
+```text
+ENTRYPOINT_AGENT_TOKEN=same_random_bearer_token_configured_in_hosted_app
+ENTRYPOINT_API_BASE_URL=https://your-hosted-entry-point.example
+UNIFI_ACCESS_BASE_URL=https://192.168.1.1:12445
+# Optional alternative to UNIFI_ACCESS_BASE_URL. Hostnames are expanded to https://host:12445.
+UNIFI_ACCESS_HOST=192.168.1.1
+UNIFI_ACCESS_TOKEN=replace_me
+UNIFI_ACCESS_VERIFY_SSL=false
+UNIFI_ACCESS_PAGE_SIZE=100
+UNIFI_REQUEST_TIMEOUT_SECONDS=30
+UNIFI_REQUEST_RETRIES=3
+UNIFI_AGENT_NAME=1205-local-lan-agent
+UNIFI_SNAPSHOT_SOURCE=local_lan_agent
+SYNC_INTERVAL_SECONDS=300
+```
+
+The hosted app accepts read-only agent snapshots at `POST /api/agent/snapshots`. It upserts UniFi users, access policies, user groups, doors, and door groups by stable UniFi IDs, stores normalized fields, stores sanitized raw JSON payloads, and records sync runs/logs. It does not write to UniFi Access.
+
+Run one local sync:
+
+```bash
+python scripts/unifi_access_agent.py --once
+```
+
+Run continuously:
+
+```bash
+python scripts/unifi_access_agent.py
+```
+
+UniFi Access API notes from the vendor documentation:
+
+- Create the API token in the UniFi Access application console under Access settings, General, Advanced, API Token. Copy it at creation time and store it only in server or local-agent environment variables.
+- Required read-only scopes for Phase 1 are `view:user`, `view:policy`, and `view:space`. User groups require UniFi Access 2.2.6 or later.
+- The local API is HTTPS on the UniFi console host at port `12445`, for example `https://192.168.1.1:12445`.
+- UniFi Access commonly uses a self-signed local certificate. Set `UNIFI_ACCESS_VERIFY_SSL=false` only as an explicit local-LAN decision.
+- The developer API requires UniFi Access 1.9.1 or later and is not available after upgrading to Identity Enterprise.
+
+Data flow:
+
+```text
+UniFi Access on building LAN -> local sync agent -> Entry Point /api/agent/snapshots -> PostgreSQL -> dashboard users page
+```
+
 Dockerized internal FastAPI app for managing building access companies, suites, users, access requests, approvals, reports, verification links, and dry-run UniFi Access sync planning. The repository now includes a split Next.js dashboard frontend under `frontend/` while preserving the existing Jinja admin UI.
 
 The local PostgreSQL database is the source of truth. UniFi Access is a target access-control system, but Phase 1 and Phase 2 do not write to UniFi.
@@ -26,7 +114,7 @@ Not implemented in Phase 1:
 - UniFi writes.
 - NFC, PIN, Touch Pass, or raw credential provisioning.
 - User deletion in UniFi.
-- Read-only reconciliation beyond a Phase 1 dry-run placeholder.
+- Local LAN read-only UniFi Access snapshot agent and hosted ingestion endpoint.
 - Scheduled reports.
 
 ## Phase 2 Scope

@@ -78,12 +78,18 @@ async def test_unifi_read_methods_paginate_and_fetch_resources(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         requested_urls.append(str(request.url))
         requested_params.append(request.url.query.decode("utf-8"))
+        assert request.headers["accept"] == "application/json"
+        assert request.headers["content-type"] == "application/json"
         if request.url.path == "/api/v1/developer/users/abc":
             return httpx.Response(200, json={"data": {"id": "abc", "email": "abc@example.com"}})
         if request.url.path == "/api/v1/developer/access_policies":
             return httpx.Response(200, json={"data": [{"id": "policy-1"}]})
         if request.url.path == "/api/v1/developer/user_groups":
             return httpx.Response(200, json={"data": [{"id": "group-1"}]})
+        if request.url.path == "/api/v1/developer/doors":
+            return httpx.Response(200, json={"data": [{"id": "door-1"}]})
+        if request.url.path == "/api/v1/developer/door_groups":
+            return httpx.Response(200, json={"data": [{"id": "door-group-1"}]})
         if "page_num=1" in request.url.query.decode("utf-8"):
             return httpx.Response(200, json={"data": [{"id": "u1"}, {"id": "u2"}]})
         return httpx.Response(200, json={"data": [{"id": "u3"}]})
@@ -94,11 +100,15 @@ async def test_unifi_read_methods_paginate_and_fetch_resources(monkeypatch):
     user = await client.get_user("abc")
     policies = await client.list_access_policies()
     groups = await client.list_user_groups()
+    doors = await client.list_doors()
+    door_groups = await client.list_door_groups()
 
     assert [item["id"] for item in users] == ["u1", "u2", "u3"]
     assert user["email"] == "abc@example.com"
     assert policies == [{"id": "policy-1"}]
     assert groups == [{"id": "group-1"}]
+    assert doors == [{"id": "door-1"}]
+    assert door_groups == [{"id": "door-group-1"}]
     assert any("expand%5B%5D=access_policy" in params for params in requested_params)
     assert any("expand%5B%5D=groups" in params for params in requested_params)
     assert any(url.endswith("/api/v1/developer/access_policies?page_num=1&page_size=2") for url in requested_urls)

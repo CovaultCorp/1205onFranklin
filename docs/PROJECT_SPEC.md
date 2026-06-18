@@ -1,22 +1,24 @@
 # docs/PROJECT_SPEC.md
 
-# Building Access Registry Project Specification
+# ENTRY POINT Project Specification
 
 ## Project name
 
-`building-access-registry`
+`ENTRY POINT`
 
 ## Purpose
 
-`building-access-registry` is a lightweight internal web application and local database for managing building access users, company membership, suite membership, access requests, approvals, reports, and UniFi Access synchronization.
+ENTRY POINT is a lightweight internal web application for 1205 on Franklin. It manages tenant membership, suite membership, local access requests, approvals, reports, and read-only UniFi Access synchronization.
 
-The local application/database is the primary source of truth for registry and workflow data.
+UniFi Access is the source of truth for actual building access. ENTRY POINT stores the hosted registry, workflow, reporting, and latest read-only UniFi snapshots pushed by the local LAN sync agent.
 
-UniFi Access is the target access-control system.
+The hosted app runs on Vercel and uses a Vercel-compatible PostgreSQL database, preferably Vercel Postgres backed by Neon.
 
 ## Implementation status
 
-Phase 1 and Phase 2 are implemented in this repository: local registry models, request portal, admin UI, reporting, email preview mode, Docker stack, dry-run-only UniFi stubs, read-only UniFi reconciliation, local UniFi snapshots, conflict detection, dry-run proposed sync jobs, and a local-only bootstrap workflow for promoting unmatched UniFi snapshots into local users. The application is being split into a FastAPI backend plus a Next.js dashboard frontend; existing Jinja templates remain available while the frontend reaches FastAPI through JSON API endpoints. Phase 3 through Phase 4 remain future work.
+Phase 1 and Phase 2 are implemented in this repository: local registry models, request portal, admin UI, reporting, email preview mode, Docker stack, dry-run-only UniFi stubs, read-only UniFi reconciliation, local UniFi snapshots, conflict detection, dry-run proposed sync jobs, and a local-only bootstrap workflow for promoting unmatched UniFi snapshots into local users. The application is being split into a FastAPI backend plus a Next.js dashboard frontend; existing Jinja templates remain available while the frontend reaches FastAPI through JSON API endpoints.
+
+The current database architecture is now Vercel-friendly: SQLAlchemy/Alembic remain the ORM and migration layer, `DATABASE_URL` points at a Vercel Postgres/Neon pooled connection, optional `DIRECT_URL` is used by Alembic for direct migrations, and a token-protected hosted API accepts read-only snapshots from the local LAN UniFi agent. Phase 3 through Phase 4 remain future work.
 
 ## Primary goals
 
@@ -54,25 +56,27 @@ Recommended stack:
 * TypeScript and NextUI for the new dashboard
 * HTMX for small interactive pieces in retained templates
 * Simple CSS
-* PostgreSQL database
+* Vercel Postgres / Neon PostgreSQL database for hosted production
 * SQLAlchemy 2.x ORM
 * Alembic migrations
 * Worker container for reconciliation/sync/report tasks
 * SMTP email support
 * Email preview mode
-* Docker Compose
-* Portainer Git-backed deployment
+* Docker Compose for local/Portainer compatibility
+* Vercel for the hosted Entry Point app
 
-Docker services:
+Docker services for local/Portainer compatibility:
 
 * `web`
 * `frontend`
 * `worker`
+* `unifi-agent` (optional local LAN deployment for read-only UniFi snapshots)
 * `db`
 
 Data storage:
 
-* PostgreSQL data should use a Docker named volume.
+* Hosted production PostgreSQL should use Vercel Postgres / Neon.
+* Local/Portainer PostgreSQL data should use a Docker named volume.
 * Exports, reports, email previews, and backups should be written to `/app/exports`.
 * Production bind mount target:
   `/mnt/unas/docker-exports/building-access-registry:/app/exports`
@@ -83,11 +87,14 @@ Core:
 
 ```text
 DATABASE_URL=postgresql+psycopg://building_access:change_me@db:5432/building_access_registry
+DIRECT_URL=
+ENTRYPOINT_AGENT_TOKEN=replace_with_random_agent_bearer_token
 APP_SECRET_KEY=change_me
 ADMIN_EMAIL=admin@example.com
 ADMIN_INITIAL_PASSWORD=
 PUBLIC_BASE_URL=http://localhost:8080
 BACKEND_API_URL=http://web:8080
+ENTRYPOINT_API_BASE_URL=http://web:8080
 AUTH_MODE=local
 TRUST_PROXY_HEADERS=false
 LOG_LEVEL=INFO
@@ -98,9 +105,14 @@ UniFi:
 
 ```text
 UNIFI_ACCESS_BASE_URL=https://192.168.1.1:12445
+UNIFI_ACCESS_HOST=
 UNIFI_ACCESS_TOKEN=replace_me
 UNIFI_ACCESS_VERIFY_SSL=false
 UNIFI_ACCESS_PAGE_SIZE=100
+UNIFI_REQUEST_TIMEOUT_SECONDS=30
+UNIFI_REQUEST_RETRIES=3
+UNIFI_AGENT_NAME=1205-local-lan-agent
+UNIFI_SNAPSHOT_SOURCE=local_lan_agent
 ENABLE_WRITES=false
 SYNC_INTERVAL_SECONDS=300
 ```
@@ -132,6 +144,7 @@ REPORT_DEFAULT_TYPE=full_building_access
 ## Security requirements
 
 * UniFi API token must remain server-side.
+* `ENTRYPOINT_AGENT_TOKEN` must remain server-side in Vercel and local agent configuration.
 * SMTP password must remain server-side.
 * Do not log secrets.
 * Do not expose secrets to templates or browser JavaScript.
@@ -144,7 +157,66 @@ REPORT_DEFAULT_TYPE=full_building_access
 * `ENABLE_EMAIL=false` must be safe and useful by writing preview files.
 * Admin dashboard must clearly show write mode and email mode.
 
+## Vercel database architecture
+
+Current provider assessment:
+
+* The repository previously documented Railway commands for `DATABASE_URL` and diagnostics.
+* The codebase does not use Prisma. The clean existing ORM is SQLAlchemy 2.x with Alembic migrations.
+* The Next.js dashboard does not directly query a database; it proxies to FastAPI JSON endpoints.
+* The local `dev.db` in this workspace contains no companies, suites, users, assignments, UniFi snapshots, or Alembic version state.
+
+Recommendation:
+
+* If the live Railway database contains no tenant/user/access data that is not recoverable from UniFi Access or source CSV files, replace it with Vercel Postgres / Neon.
+* If Railway contains tenant/user/access data, export it first with `scripts/diagnose_users.py` and the old dump/bootstrap export flows, store the backup path, and only then migrate.
+* Do not destroy production data without explicit confirmation.
+
+Connection rules:
+
+* `DATABASE_URL` is required by the FastAPI backend and should point to the Vercel/Neon pooled PostgreSQL URL.
+* `DIRECT_URL` is optional for this SQLAlchemy app. If supplied, Alembic uses it for migrations.
+* `postgres://` and `postgresql://` URLs are normalized to the psycopg SQLAlchemy driver.
+
+Local development reset:
+
+```text
+python scripts/reset_local_db.py --yes
+python scripts/seed_entrypoint.py
+```
+
+Agent ingestion:
+
+* The local LAN agent pulls read-only data from UniFi Access.
+* The local UniFi API endpoint is HTTPS on port `12445` on the building console host.
+* The developer API requires UniFi Access 1.9.1 or later and is unavailable after upgrading to Identity Enterprise.
+* Create the token in the UniFi Access application console under Access settings, General, Advanced, API Token.
+* Required read-only token scopes for Phase 1 are `view:user`, `view:policy`, and `view:space`; user groups require UniFi Access 2.2.6 or later.
+* `UNIFI_ACCESS_VERIFY_SSL=false` may be used for the console self-signed certificate, but it must be explicit.
+* The agent supports `python scripts/unifi_access_agent.py --once` for a single sync and `python scripts/unifi_access_agent.py` for continuous sync using `SYNC_INTERVAL_SECONDS`.
+* The agent pushes snapshots to `POST /api/agent/snapshots`.
+* The request must include `Authorization: Bearer $ENTRYPOINT_AGENT_TOKEN`.
+* The hosted app upserts UniFi users, access policies, user groups, doors, and door groups by stable UniFi IDs.
+* Raw UniFi payloads are sanitized before storage.
+* The ingestion endpoint never writes to UniFi Access.
+* Records flow from UniFi Access on the building LAN to the local sync agent, then to the Entry Point API, then PostgreSQL, then the dashboard users page.
+
 ## Main entities
+
+### BuildingProperty
+
+Represents the single hosted Entry Point property.
+
+Seeded record:
+
+* name: ENTRY POINT
+* display_name: 1205 on Franklin
+* slug: 1205-franklin
+* address_line1: 1205 Franklin
+
+### Tenant
+
+Tenant data is represented by the existing `Company` model/table for compatibility with the current UI and import tools. User-facing copy may say Tenant while API fields may still be named Company until the legacy UI is fully renamed.
 
 ### PortalAccount
 
@@ -350,6 +422,147 @@ Fields:
 * raw_snapshot_json
 * last_seen_at
 * last_synced_at
+* created_at
+* updated_at
+
+### UnifiAccessPolicy
+
+Latest known read-only UniFi Access Policy snapshot.
+
+Fields:
+
+* id
+* property_id
+* unifi_policy_id
+* name
+* description
+* status
+* raw_snapshot_json
+* last_seen_at
+* created_at
+* updated_at
+
+### UnifiUserGroup
+
+Latest known read-only UniFi User Group snapshot.
+
+Fields:
+
+* id
+* property_id
+* unifi_group_id
+* name
+* description
+* status
+* raw_snapshot_json
+* last_seen_at
+* created_at
+* updated_at
+
+### UnifiDoor
+
+Latest known read-only UniFi Door snapshot.
+
+Fields:
+
+* id
+* property_id
+* door_group_id
+* unifi_door_id
+* name
+* full_name
+* status
+* raw_snapshot_json
+* last_seen_at
+* created_at
+* updated_at
+
+### UnifiDoorGroup
+
+Latest known read-only UniFi Door Group snapshot.
+
+Fields:
+
+* id
+* property_id
+* unifi_door_group_id
+* name
+* description
+* raw_snapshot_json
+* last_seen_at
+* created_at
+* updated_at
+
+### SyncRun
+
+Represents a sync ingestion run from the local LAN agent or backend reconciliation.
+
+Fields:
+
+* id
+* property_id
+* source
+* agent_name
+* status
+* started_at
+* completed_at
+* observed_at
+* summary_json
+* last_error
+* created_at
+* updated_at
+
+### SyncSnapshot
+
+Represents one raw/sanitized observed object from a sync run.
+
+Fields:
+
+* id
+* property_id
+* sync_run_id
+* snapshot_type
+* source
+* external_id
+* normalized_json
+* raw_snapshot_json
+* observed_at
+* created_at
+* updated_at
+
+### SyncRunLog
+
+Represents operational logs for a sync run.
+
+Fields:
+
+* id
+* sync_run_id
+* level
+* message
+* context_json
+* created_at
+
+### StagedAccessChange
+
+Represents proposed access changes for future write-back. These records are created for approved requests and dry-run sync planning, but are not applied to UniFi in the current phase.
+
+Fields:
+
+* id
+* property_id
+* sync_job_id
+* access_request_id
+* local_user_id
+* unifi_user_id
+* change_type
+* status: staged/approved/applied/failed/cancelled
+* proposed_before_json
+* proposed_after_json
+* approved_by_account_id
+* approved_at
+* applied_at
+* last_error
 * created_at
 * updated_at
 

@@ -45,7 +45,7 @@ export type AccessRequest = {
 };
 
 export type User = {
-  id: number;
+  id: number | string;
   name: string;
   email: string;
   employee_number?: string | null;
@@ -56,6 +56,15 @@ export type User = {
   department?: string | null;
   status: string;
   last_verified_at?: string | null;
+  data_source?: string;
+  unifi_user_id?: string | null;
+  unifi_status?: string | null;
+  credential_summary?: string | null;
+  last_synced_at?: string | null;
+  onboard_time?: string | null;
+  nfc_card_count?: number | null;
+  touch_pass_status?: string | null;
+  unifi_suite_number?: string | null;
   desired_unifi_access_policy_names?: string[];
   desired_unifi_user_group_names?: string[];
   current_unifi_access_policy_names?: string[];

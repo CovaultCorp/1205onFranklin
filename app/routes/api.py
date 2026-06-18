@@ -339,6 +339,7 @@ def _request_json(access_request: AccessRequest) -> dict[str, Any]:
 def _user_json(user: User, snapshot: UnifiUser | None = None) -> dict[str, Any]:
     current_policy_names = snapshot.access_policy_names if snapshot else []
     current_group_names = snapshot.group_names if snapshot else []
+    data_source = "Entry Point + UniFi Access" if snapshot else "Entry Point"
     return {
         "id": user.id,
         "name": f"{user.first_name} {user.last_name}",
@@ -353,10 +354,64 @@ def _user_json(user: User, snapshot: UnifiUser | None = None) -> dict[str, Any]:
         "department": user.department,
         "status": user.status,
         "last_verified_at": user.last_verified_at,
+        "data_source": data_source,
+        "unifi_user_id": snapshot.unifi_user_id if snapshot else None,
+        "unifi_status": snapshot.status if snapshot else None,
+        "credential_summary": _credential_summary(snapshot),
+        "last_synced_at": snapshot.last_synced_at if snapshot else None,
+        "onboard_time": snapshot.onboard_time if snapshot else None,
+        "nfc_card_count": snapshot.nfc_card_count if snapshot else None,
+        "touch_pass_status": snapshot.touch_pass_status if snapshot else None,
+        "unifi_suite_number": snapshot.suite_number if snapshot else None,
         "desired_unifi_access_policy_names": user.desired_unifi_access_policy_names or [],
         "desired_unifi_user_group_names": user.desired_unifi_user_group_names or [],
         "current_unifi_access_policy_names": current_policy_names or [],
         "current_unifi_user_group_names": current_group_names or [],
+    }
+
+
+def _credential_summary(snapshot: UnifiUser | None) -> str:
+    if snapshot is None:
+        return "Not synced"
+    parts: list[str] = []
+    if snapshot.nfc_card_count:
+        parts.append(f"NFC {snapshot.nfc_card_count}")
+    if snapshot.touch_pass_status:
+        parts.append(f"Touch Pass {snapshot.touch_pass_status}")
+    if snapshot.license_plate_count:
+        parts.append(f"Plates {snapshot.license_plate_count}")
+    return ", ".join(parts) if parts else "No credentials observed"
+
+
+def _snapshot_user_json(snapshot: UnifiUser) -> dict[str, Any]:
+    full_name = snapshot.full_name or " ".join(part for part in (snapshot.first_name, snapshot.last_name) if part).strip()
+    return {
+        "id": f"unifi-{snapshot.id}",
+        "name": full_name or snapshot.email or snapshot.unifi_user_id,
+        "first_name": snapshot.first_name,
+        "last_name": snapshot.last_name,
+        "email": snapshot.email or "",
+        "employee_number": snapshot.employee_number,
+        "company": None,
+        "suite": None,
+        "property": _property_json(snapshot.property),
+        "access_profile": None,
+        "department": None,
+        "status": snapshot.status or "unknown",
+        "last_verified_at": None,
+        "data_source": "UniFi Access",
+        "unifi_user_id": snapshot.unifi_user_id,
+        "unifi_status": snapshot.status,
+        "credential_summary": _credential_summary(snapshot),
+        "last_synced_at": snapshot.last_synced_at,
+        "onboard_time": snapshot.onboard_time,
+        "nfc_card_count": snapshot.nfc_card_count,
+        "touch_pass_status": snapshot.touch_pass_status,
+        "unifi_suite_number": snapshot.suite_number,
+        "desired_unifi_access_policy_names": [],
+        "desired_unifi_user_group_names": [],
+        "current_unifi_access_policy_names": snapshot.access_policy_names or [],
+        "current_unifi_user_group_names": snapshot.group_names or [],
     }
 
 
@@ -937,6 +992,7 @@ def api_admin_users(
     )
 
     user_rows = []
+    linked_snapshot_ids: set[int] = set()
     for user in users:
         snapshot = session.scalar(
             select(UnifiUser)
@@ -944,8 +1000,29 @@ def api_admin_users(
             .order_by(UnifiUser.local_user_id.desc(), UnifiUser.last_seen_at.desc().nullslast())
             .limit(1)
         )
+        if snapshot is not None:
+            linked_snapshot_ids.add(snapshot.id)
         user_rows.append(_user_json(user, snapshot))
-    return {"users": user_rows, "meta": {"total_users": total_users, "filters": {}}}
+
+    unmatched_query = select(UnifiUser).where(UnifiUser.local_user_id.is_(None)).order_by(
+        UnifiUser.full_name, UnifiUser.email, UnifiUser.unifi_user_id
+    )
+    if linked_snapshot_ids:
+        unmatched_query = unmatched_query.where(UnifiUser.id.not_in(linked_snapshot_ids))
+    unmatched_snapshots = session.scalars(unmatched_query).all()
+    for snapshot in unmatched_snapshots:
+        user_rows.append(_snapshot_user_json(snapshot))
+
+    return {
+        "users": user_rows,
+        "meta": {
+            "total_users": total_users,
+            "unifi_snapshots": snapshot_count,
+            "unmatched_unifi_snapshots": unmatched_snapshot_count,
+            "rows_returned": len(user_rows),
+            "filters": {},
+        },
+    }
 
 
 @router.get("/admin/companies")

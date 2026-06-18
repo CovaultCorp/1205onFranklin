@@ -28,7 +28,8 @@ def _has_column(inspector: sa.Inspector, table: str, column: str) -> bool:
 def _add_property_column(inspector: sa.Inspector, table: str) -> None:
     if table in set(inspector.get_table_names()) and not _has_column(inspector, table, "property_id"):
         op.add_column(table, sa.Column("property_id", sa.Integer(), nullable=True))
-        op.create_foreign_key(f"fk_{table}_property_id_building_properties", table, "building_properties", ["property_id"], ["id"])
+        if op.get_bind().dialect.name != "sqlite":
+            op.create_foreign_key(f"fk_{table}_property_id_building_properties", table, "building_properties", ["property_id"], ["id"])
 
 
 def _create_index_if_missing(inspector: sa.Inspector, table: str, name: str, columns: list[str], *, unique: bool = False) -> None:
